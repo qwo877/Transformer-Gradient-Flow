@@ -1,0 +1,2 @@
+﻿key,label,params,seeds,cond_detach,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_uniform_baseline,cond_path_share_final,final_trunk_rms,final_cond_rms,max_decomposition_error,diverged
+bn,BN (Post),3196992,3,,7096.52 ± 816.50,10947.9 ± 1243.3,3.4566 ± 0.2958,nan,0.154 ± 0.074,0.093 ± 0.017,0.059,,,,0.00e+00,

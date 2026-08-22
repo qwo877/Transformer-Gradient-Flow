@@ -1,0 +1,40 @@
+{
+ "timestamp": "2026-08-12T01:40:31+08:00",
+ "command": "run_experiment.py --task copy --out-dir copy_bn_evalmode --seeds 3 --deterministic --probe-eval-mode --only bn",
+ "git_commit": "3161a71a5c27dd313904dc86e05879a1c62d73be",
+ "git_branch": "master",
+ "git_dirty": true,
+ "python": "3.13.3",
+ "torch": "2.8.0+cu128",
+ "cuda": "12.8",
+ "cudnn": 91002,
+ "gpu": "NVIDIA GeForce RTX 5070",
+ "platform": "Windows-11-10.0.26200-SP0",
+ "args": {
+  "task": "copy",
+  "modk_gap": 16,
+  "steps": 1500,
+  "seeds": 3,
+  "layers": 16,
+  "d_model": 128,
+  "n_heads": 4,
+  "d_ff": 512,
+  "vocab": 64,
+  "seq_len": 64,
+  "batch": 32,
+  "lr": 0.0003,
+  "probe_every": 10,
+  "emb_std": 0.02,
+  "device": "cuda",
+  "replot": false,
+  "only": [
+   "bn"
+  ],
+  "out_dir": "copy_bn_evalmode",
+  "train_frac": 0.9,
+  "val_every": 0,
+  "val_batches": 20,
+  "probe_eval_mode": true,
+  "deterministic": true
+ }
+}

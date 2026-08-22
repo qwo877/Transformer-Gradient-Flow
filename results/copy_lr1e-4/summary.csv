@@ -1,0 +1,5 @@
+﻿key,label,params,seeds,cond_detach,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_uniform_baseline,cond_path_share_final,final_trunk_rms,final_cond_rms,max_decomposition_error,diverged
+ln_post,LN / Post-LN,3196992,3,,1.82 ± 0.16,69.3 ± 6.8,1.1956 ± 0.3769,nan,0.410 ± 0.045,0.063 ± 0.001,0.059,,,,0.00e+00,
+adain_loc,AdaIN-local (Post),4245568,3,,37.52 ± 8.76,1581.6 ± 353.1,2.7934 ± 2.3299,nan,0.137 ± 0.090,0.059 ± 0.000,0.059,0.006,4.413e-03,2.852e-05,2.65e-08,
+pre_ln,Pre-LN,3197248,3,,4.71 ± 0.40,268.0 ± 37.3,0.0011 ± 0.0000,nan,0.509 ± 0.011,0.064 ± 0.003,0.059,,,,0.00e+00,
+post_ln_st,"Post-LN(前向同 LN,反向恆等)",3196992,3,,3908.61 ± 602.30,6393.4 ± 1141.2,4.1805 ± 0.0141,nan,0.075 ± 0.012,0.063 ± 0.001,0.059,,,,0.00e+00,
