@@ -1,3 +1,7 @@
-torch>=2.0
-numpy
-matplotlib
+torch==2.8.0
+numpy==2.2.6
+matplotlib==3.10.3
+scipy==1.16.1
+# 本專案結果的產生環境:
+#   torch 2.8.0+cu128 / CUDA 12.8 / cuDNN 91002
+#   NVIDIA GeForce RTX 5070, Windows 11, Python 3.13.3
