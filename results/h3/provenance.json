@@ -1,0 +1,39 @@
+{
+ "timestamp": "2026-08-08T22:01:54+08:00",
+ "command": "run_experiment.py --task copy --out-dir h3 --seeds 5 --only adain adain_loc adain_loc_detach spade spade_detach",
+ "git_commit": "4a27243ad80a9b9f01afffd580b6885a56ae8740",
+ "git_branch": "master",
+ "git_dirty": false,
+ "python": "3.13.3",
+ "torch": "2.8.0+cu128",
+ "cuda": "12.8",
+ "cudnn": 91002,
+ "gpu": "NVIDIA GeForce RTX 5070",
+ "platform": "Windows-11-10.0.26200-SP0",
+ "args": {
+  "task": "copy",
+  "modk_gap": 16,
+  "steps": 1500,
+  "seeds": 5,
+  "layers": 16,
+  "d_model": 128,
+  "n_heads": 4,
+  "d_ff": 512,
+  "vocab": 64,
+  "seq_len": 64,
+  "batch": 32,
+  "lr": 0.0003,
+  "probe_every": 10,
+  "emb_std": 0.02,
+  "device": "cuda",
+  "replot": false,
+  "only": [
+   "adain",
+   "adain_loc",
+   "adain_loc_detach",
+   "spade",
+   "spade_detach"
+  ],
+  "out_dir": "h3"
+ }
+}

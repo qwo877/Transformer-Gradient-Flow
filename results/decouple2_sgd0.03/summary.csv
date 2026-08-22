@@ -1,0 +1,4 @@
+﻿key,label,params,seeds,cond_detach,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_uniform_baseline,cond_path_share_final,final_trunk_rms,final_cond_rms,max_decomposition_error,diverged
+ln_post,LN / Post-LN,3196992,3,,1.82 ± 0.16,69.3 ± 6.8,4.1642 ± 0.0001,nan,0.060 ± 0.001,0.063 ± 0.001,0.059,,,,0.00e+00,
+pre_ln,Pre-LN,3197248,3,,4.71 ± 0.40,268.0 ± 37.3,0.0006 ± 0.0000,nan,0.745 ± 0.005,0.064 ± 0.003,0.059,,,,0.00e+00,
+post_ln_gr,Post-LN(反向梯度重正規化),3196992,3,,1.24 ± 0.05,44.1 ± 0.5,4.1645 ± 0.0009,nan,0.062 ± 0.004,0.063 ± 0.001,0.059,,,,0.00e+00,

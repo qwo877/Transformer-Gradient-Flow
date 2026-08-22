@@ -1,0 +1,43 @@
+{
+ "timestamp": "2026-08-15T14:09:07+08:00",
+ "command": "run_experiment.py --task copy --out-dir decouple2_sgd0.01 --seeds 3 --deterministic --optimizer sgd --lr 0.01 --only ln_post post_ln_gr pre_ln",
+ "git_commit": "02563179dc5a076d4e498c9f887174cba2a44435",
+ "git_branch": "master",
+ "git_dirty": false,
+ "python": "3.13.3",
+ "torch": "2.8.0+cu128",
+ "cuda": "12.8",
+ "cudnn": 91002,
+ "gpu": "NVIDIA GeForce RTX 5070",
+ "platform": "Windows-11-10.0.26200-SP0",
+ "args": {
+  "task": "copy",
+  "modk_gap": 16,
+  "steps": 1500,
+  "seeds": 3,
+  "layers": 16,
+  "d_model": 128,
+  "n_heads": 4,
+  "d_ff": 512,
+  "vocab": 64,
+  "seq_len": 64,
+  "batch": 32,
+  "lr": 0.01,
+  "probe_every": 10,
+  "emb_std": 0.02,
+  "device": "cuda",
+  "replot": false,
+  "only": [
+   "ln_post",
+   "post_ln_gr",
+   "pre_ln"
+  ],
+  "out_dir": "decouple2_sgd0.01",
+  "train_frac": 0.9,
+  "val_every": 0,
+  "val_batches": 20,
+  "probe_eval_mode": false,
+  "optimizer": "sgd",
+  "deterministic": true
+ }
+}
