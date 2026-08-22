@@ -1,0 +1,5 @@
+﻿key,label,params,seeds,cond_detach,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_uniform_baseline,cond_path_share_final,final_trunk_rms,final_cond_rms,max_decomposition_error,diverged
+bn,BN (Post),3196992,10,,3.26 ± 0.21,162.1 ± 11.2,3.1857 ± 1.1518,nan,0.173 ± 0.144,0.060 ± 0.001,0.059,,,,0.00e+00,
+in,IN (Post),3196992,10,,37.19 ± 4.93,1567.8 ± 214.8,3.7299 ± 0.7084,nan,0.112 ± 0.077,0.060 ± 0.001,0.059,,,,0.00e+00,
+gn,GN (Post),3196992,10,,2.43 ± 0.58,115.5 ± 26.4,3.8929 ± 0.4603,nan,0.147 ± 0.096,0.062 ± 0.001,0.059,,,,0.00e+00,
+spade,SPADE (Post),3985472,10,,33.88 ± 3.97,1437.1 ± 172.6,1.8688 ± 1.8781,nan,0.211 ± 0.100,0.060 ± 0.001,0.059,0.982,3.004e-04,1.622e-03,2.93e-08,

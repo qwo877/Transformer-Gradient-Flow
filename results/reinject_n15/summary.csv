@@ -1,0 +1,5 @@
+﻿key,label,params,seeds,cond_detach,reinject,reinject_wnorm_min,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_uniform_baseline,cond_path_share_final_seed0,final_trunk_rms_seed0,final_cond_rms_seed0,max_decomposition_error,diverged
+ln_post,LN / Post-LN,3196992,15,,,,2.12 ± 0.39,79.0 ± 14.7,4.1619 ± 0.0006,nan,0.063 ± 0.001,0.063 ± 0.001,0.059,,,,0.00e+00,
+adain_loc,AdaIN-local (Post),4245568,15,,,,40.03 ± 6.77,1682.7 ± 286.6,1.5701 ± 1.9829,nan,0.272 ± 0.163,0.060 ± 0.001,0.059,0.983,7.730e-06,4.903e-05,2.96e-08,
+post_reinject,Post-LN + 純重注入(線性),3725376,15,,linear,0.331,1.76 ± 0.37,66.8 ± 14.9,0.0024 ± 0.0001,nan,0.230 ± 0.014,0.063 ± 0.001,0.059,1.000,7.727e-08,1.334e-05,2.57e-08,
+post_reinject_detach,Post-LN + 純重注入(bypass 切斷),3725376,15,yes,linear,0.386,1.76 ± 0.37,66.8 ± 14.9,0.0050 ± 0.0011,nan,0.231 ± 0.009,0.063 ± 0.001,0.059,0.000,2.621e-06,0.000e+00,0.00e+00,
