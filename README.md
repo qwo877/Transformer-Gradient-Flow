@@ -1,6 +1,6 @@
 # Transformer Gradient Flow
 
-> 由於寫完論文後作者這個人燃盡了 所以此次更新的 README 由 AI 更新 請見諒
+> 由於寫完論文後作者這個人燃盡了 所以此次更新的 README 由 AI 更新 請見諒 (9/29更新)
 
 ## Paper (TAAI 2026)
 
