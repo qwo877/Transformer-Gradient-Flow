@@ -1,7 +1,90 @@
 # Transformer Gradient Flow
 
+> 由於寫完論文後作者這個人燃盡了 所以此次更新的 README 由 AI 更新 請見諒
+
+## Paper (TAAI 2026)
+
+**Which Direction Matters? A Paired Single-Path Ablation of Embedding Re-injection in Post-LN Transformers.**
+Submitted to the TAAI 2026 high-school special session.
+
+This section maps the paper to the code and data in this repository. The rest of the README (in Chinese)
+documents the whole project; the paper corresponds to §5.4.
+
+**Claim.** For a 16-layer Post-LN Transformer on a previous-token copy task, forward re-injection of
+token content rescues training; the backward bypass speeds it up but is not necessary.
+
+| Copy task, 15 paired seeds | Escapes (loss < 0.1) | McNemar *p* vs. Post-LN | Median final loss |
+|---|---:|---:|---:|
+| Post-LN | 0/15 | — | 4.1621 |
+| + re-injection | 15/15 | 6.1e-5 | 0.0025 |
+| + re-injection, backward bypass detached | 15/15 | 6.1e-5 | 0.0051 |
+| + re-injection, MLP projection (AdaIN-local's conditional parameter count) | 15/15 | 6.1e-5 | 0.0025 |
+| + re-injection of the token embedding only | 15/15 | 6.1e-5 | 0.0022 |
+| + re-injection of the positional embedding only | 0/15 | 1 | 4.1621 |
+| + re-injection of a frozen random per-position vector | 0/15 | 1 | 4.1621 |
+| AdaIN-local (not a causal comparison: it also replaces LayerNorm with InstanceNorm) | 9/15 | 0.0039 | 0.0771 |
+
+The detached version escapes later on every paired seed (by 176–294 steps; sign test *p* = 6.1e-5).
+The rescue persists at lr = 1e-4 (15/15 vs. 0/15) but not on modk, which adds tokens 16 positions apart:
+there re-injection matches Post-LN seed for seed, while Pre-LN makes partial progress on 12/15 seeds.
+The evidence covers one task family, one depth, and one machine.
+
+**Where each result lives**
+
+| In the paper | Data | Produced or checked by |
+|---|---|---|
+| Table 1, Fig. 2, Results | `results/reinject_n15_paired/` | `make_table2.py`, `paper/make_figs.py` |
+| Threats: lr = 1e-4 | `results/threats_lr1e-4/` | `verify_paper_numbers.py` |
+| Threats: modk | `results/threats_modk/` | `verify_paper_numbers.py` |
+| Threats: attention by layer | `results/layer_attn_n15/` | `analyze_layer_attn.py` |
+| Pairing: 260 shared tensors and the step-0 logits are identical | — | `check_pairing.py` |
+| Every number in the paper | all of the above | `verify_paper_numbers.py` |
+
+**Check without retraining** (a CPU is enough):
+
+```bash
+pip install -r requirements.txt
+python check_pairing.py          # every configuration PASS: identical to ln_post at step 0
+python verify_paper_numbers.py   # recomputes every number in the paper; last line: ALL PASS
+python make_table2.py            # regenerates Table 1 into results/reinject_n15_paired/table2.{md,tex}
+```
+
+**Retrain.** Set `CUBLAS_WORKSPACE_CONFIG=:4096:8` before starting Python, and pick a new `--out-dir`
+so that the published results are not overwritten:
+
+```bash
+python run_experiment.py --task copy --seeds 15 --deterministic --out-dir paired_rerun --only ln_post adain_loc post_reinject post_reinject_detach post_reinject_mlp post_reinject_tok post_reinject_pos post_reinject_rand pre_ln deepnorm
+python run_experiment.py --task copy --seeds 15 --deterministic --lr 1e-4 --out-dir lr1e-4_rerun --only ln_post post_reinject
+python run_experiment.py --task modk --seeds 15 --deterministic --out-dir modk_rerun --only ln_post post_reinject pre_ln
+```
+
+**Setup.** 16 layers, d = 128, 4 heads, d_ff = 512 with GELU, no dropout; vocabulary 64, sequence length 64,
+batch 32; Adam at 3e-4 without weight decay, 1,500 steps, no warmup, no learning-rate schedule, no gradient
+clipping. Linear layers use Xavier-uniform weights and zero biases; token and position embeddings are drawn
+from N(0, 0.02²). Seed *s* initializes the model with `torch.manual_seed(s)`, and the data come from a separate
+generator seeded 1234 + *s*, so every configuration sees the same sequences. Each batch is freshly sampled,
+so the training loss is also a held-out loss. An escape is a mean loss below 0.1 over the last 10 steps.
+The results were produced with torch 2.8.0+cu128 on one RTX 5070 (Windows 11, Python 3.13.3).
+
+**Notes on the data**
+
+- Pairing needs the current `model.py` and `normalizations.py`. They were fixed on 2026-08-28 so that added
+  modules no longer draw from the global random stream. Folders produced before the fix, such as
+  `results/reinject_n15/` and `results/h3_n15/`, are not paired. With the current code, configurations that add
+  conditional modules (AdaIN, SPADE, re-injection) start from different trunk weights than they did in those
+  folders, so their per-seed numbers will not be reproduced exactly. Configurations without such modules are
+  unaffected.
+- `attn_to_target_*` is now the maximum over (layer, head) of the attention to t − 1. The older definition,
+  which averages the heads within each layer, is kept as `*_headmean`. Folders produced before the change use
+  the older definition.
+- The new folders' `provenance.json` files record `git_commit: null`, because the runs were made outside a
+  git checkout. `results/layer_attn_n15/` was rerun on 2026-09-16 with the final code and matches
+  `reinject_n15_paired` seed for seed; `verify_paper_numbers.py` checks this.
+
+---
+
 > **專案目的**:探討同一個問題:**梯度在 Transformer 裡怎麼走、哪些設計會影響 trainability**。
-> 本專案以 9 種 normalization × 4 種 placement 為切入點,另加 7 個診斷對照,共 22 個配置(主表報 15 個)。
+> 本專案以 9 種 normalization × 4 種 placement 為切入點,另加 10 個診斷對照,共 25 個配置(主表報 15 個)。
 >
 > 這是一個**重現與視覺化型的實驗研究** —— 用嚴格控制變因的合成實驗,從 gradient flow 的角度
 > 重現並視覺化權威論文(Xiong et al. 2020、Wang et al. 2022 等)的既有結論。
@@ -11,14 +94,18 @@
 > 這算是一個嘗試做的一份研究實驗(?) 我不確定。
 > 這份專案完成於我高中畢業後、升大學前的暑假,沒有指導。
 >
-> 這不是原創研究。核心結論:Post-LN 的 gradient path 病灶、Pre-LN 的 identity shortcut、
+> H1、H2 那部分不是原創研究。核心結論:Post-LN 的 gradient path 病灶、Pre-LN 的 identity shortcut、
 > DeepNorm 的修復機制 —— 均已見於 Xiong et al. (2020) 與 Wang et al. (2022);
 > 我做的是在受控的合成環境下重現並視覺化這些結論,用來確認自己是否真的理解了它們,
 > 以及解決我自己的疑問。
 >
 > 帶一點原創性的是 H3 那條線:AdaIN-local 的 granularity ablation(15 seeds),
-> 以及後續為了找出機制而做的純重注入對照(15 seeds)。後者得到一個**肯定式**的機制結果,
-> 不只是排除候選(見 §5.4)。但它的適用範圍是**單一任務 × 單一深度 × 單一 learning rate**,
+> 以及後續為了找出機制而做的純重注入對照。後者整理成了 TAAI 2026 的論文(見最上方 Paper 一節):
+> 用配對種子與單一路徑消融,把一條繞過 normalization 的重注入路徑拆成正向與反向兩個方向,
+> 結論是**救援來自正向重注入的 token 內容;反向梯度旁路會加速,但不是必要的**(§5.4)。
+> 「加一條繞過 normalization 的路徑有用」本身不是新發現(B2T、DenseFormer、input injection 都屬這一類,§6.3);
+> 據我們所知,新的是把兩個方向拆開來檢驗。
+> 適用範圍:**單一任務家族 × 單一深度 × 單一機器**;lr = 1e-4 時仍成立,換成 modk 就不成立(§5.4 (e))。
 
 
 **術語慣例**:AI 術語一律使用文獻中的英文原文,中文只用於敘述。
@@ -75,13 +162,16 @@ AdaIN / SPADE 的 affine 參數 γ、β 由**條件輸入**經一個淺網路生
 
 | | 路徑 | 機制 |
 |---|---|---|
-| **(a) 反向** | `cond.grad` 繞過殘差主幹回到 embedding | gradient bypass:主幹被 Post placement 堵住時,梯度改走這條 |
+| **(a) 反向** | `cond.grad` 從每個 norm 點跳過中間所有 LN,直接回到 embedding | gradient bypass:梯度不必穿過主幹上的 LN 連乘,就能回到 embedding |
 | **(b) 正向** | 每層的 γ/β 直接讀到乾淨的 per-position embedding | 從 embedding 拉到全部 16 層輸入的重注入,類似 DenseNet 式的 skip |
 
 (b) 還有跨位置效果:第 l 層算出的 `h·(1+γ(cond_t)) + β(cond_t)` 會寫回殘差流,於是第 l+1 層的
 attention 在位置 t 讀取位置 t−1 時,讀到的是「含有乾淨 embedding_{t−1} 成分」的向量。
 **兩者要靠 `cond = x.clone().detach()` 的對照才分得開**(正向逐位元保留、反向完全切斷),
-結果見 §5.4 —— 起作用的是 (b),不是 (a)。
+結果見 §5.4 —— 救援靠的是 (b) 帶進來的 **token 內容**;(a) 會加速,但不是必要的。
+detach 切掉的只有 (a) 這條流回 embedding 的梯度,條件模組自己的權重照樣收到參數梯度、照樣在學。
+兩個方向也不能完全分開:(b) 改變了之後每一個 LN 的輸入,也就改變了它們的 Jacobian,
+detach 只移除顯式的旁路梯度(§7 第 10 點)。
 
 ## 3. Hypotheses
 
@@ -96,7 +186,7 @@ attention 在位置 t 讀取位置 t−1 時,讀到的是「含有乾淨 embeddi
   **granularity**(per-position vs global)。
   *預測:以三方 ablation 孤立 —— AdaIN(global 向量)/ AdaIN-local(per-position,與 AdaIN
   唯一差別是不做 average pooling)/ SPADE(per-position + 共享 MLP)。*
-  *(granularity 成立;逃脫機制由直接對照確定為正向 per-position re-injection,見 §5.4。)*
+  *(granularity 成立;逃脫機制由直接對照確定為正向重注入,而且要的是 token 內容、不是位置訊號,見 §5.4。)*
 - **H4**:條件路徑只能在「位置內」調變,無法跨位置搬運資訊;解題所需的「取得前一格 token」
   仍必須由 attention 完成。
   *預測:成功收斂的模型,attention 對前一格的權重遠高於 uniform baseline ≈ 0.059。*
@@ -127,6 +217,15 @@ leakage,見 §5.2 第 2 點。
 (warmup 會遮住 Post-LN 的病灶)。主表 3 個隨機種子,報 mean±std(ddof=1);
 H3 那條線與機制實驗為 15 種子,2×2 解耦為 10 種子。
 
+其他共同設定:FFN 用 GELU、沒有 dropout;Linear 層 Xavier-uniform 初始化、bias 為 0;token 與 position
+embedding 為 N(0, 0.02²);Adam 沒有 weight decay;沒有 gradient clipping,也沒有 learning rate schedule。
+copy / modk 每一步都抽全新的隨機序列,所以 training loss 同時就是 held-out loss。
+**「解掉」= 最後 10 步的平均 loss < 0.1。**
+
+同一顆種子 s:模型用 `torch.manual_seed(s)` 初始化,資料由另一個 `Generator` 以 `1234 + s` 產生,
+所以各配置看到的資料序列完全相同。**但 2026-08-28 以前的程式裡,多了條件模組(AdaIN / SPADE / 重注入)
+的配置雖然用同一顆種子,主幹的初始權重並不相同**(模組建構時多抽了 RNG);修正與影響見 §5.4 (0)。
+
 **參數量不相等 —— A 組不是 equal-parameter 比較**,conditional normalization 多了 γ/β 的生成層:
 
 | 配置 | 參數量 | 相對 LN |
@@ -135,6 +234,8 @@ H3 那條線與機制實驗為 15 種子,2×2 解耦為 10 種子。
 | RMSNorm | 3,192,896 | −0.1% |
 | SPADE | 3,985,472 | **+24.7%** |
 | AdaIN / AdaIN-local | 4,245,568 | **+32.8%** |
+| 純重注入 / E2 的三個變體(診斷對照,§5.4) | 3,725,376 | +16.5% |
+| 純重注入(MLP)(診斷對照,§5.4) | 4,253,760 | +33.1% |
 
 A 組的贏家 AdaIN-local 比 LN-Post 多 33% 參數,還多一條輸入重注入路徑。
 **但 AdaIN vs AdaIN-local 是精確等參數的**(皆 4,245,568),γ/β zero-init 時兩者在數學上是
@@ -161,9 +262,11 @@ A 組的贏家 AdaIN-local 比 LN-Post 多 33% 參數,還多一條輸入重注�
 **H3 對照組:`AdaIN-local (bypass 切斷)` 與 `SPADE (bypass 切斷)`** —— 把 `cond` detach 掉:
 正向 re-injection 逐位元保留,反向 gradient bypass 完全切斷。
 
-以上 15 個進主表。另有 **7 個診斷對照**不進主表(它們不是要比較優劣的 normalization):
+以上 15 個進主表。另有 **10 個診斷對照**不進主表(它們不是要比較優劣的 normalization):
 `post_ln_st` / `post_ln_gr`(§5.5 的解耦)、`post_reinject` / `post_reinject_detach` /
-`post_reinject_mlp`(§5.4 的純重注入)、`pre_ln_gr` / `deepnorm_gr`(§5.5 的健康對照)。
+`post_reinject_mlp`(§5.4 的純重注入)、`post_reinject_tok` / `post_reinject_pos` / `post_reinject_rand`
+(§5.4 的 E2:`cond` 只餵 token 內容 / 只餵位置 / 凍結的隨機 per-position 向量)、
+`pre_ln_gr` / `deepnorm_gr`(§5.5 的健康對照)。
 
 ### 4.4 三種量測工具
 
@@ -180,6 +283,10 @@ A 組的贏家 AdaIN-local 比 LN-Post 多 33% 參數,還多一條輸入重注�
    init 值**(copy 0.064),解析的單層 uniform baseline(copy 0.059、modk 0.028)列為參考 ——
    16 個帶雜訊的值取最大,期望值本來就高於單層期望。probe 走的不是訓練用的程式碼路徑:`MHSA`
    訓練時用 `F.scaled_dot_product_attention`,probe 時改用手算的 `scores → softmax`,數學等價、數值不同。
+   **口徑在 2026-08-29 改過一次**:現在的 `attn_to_target_*` 是每顆 head 先對 batch 與位置平均,再對
+   (層, head) 取最大(head-max),問的是「有沒有任何一顆 head 學會這個 offset」;舊口徑(每層先把 4 顆 head
+   平均,再取 16 層最大)另存為 `*_headmean`。§5.1–§5.3 與 8 月底以前產生的資料夾是舊口徑,§5.4 的配對版是新口徑
+   (例如 `post_reinject` 新口徑 0.252、舊口徑 0.231)。
 
 **三個指標的共同限制:**
 
@@ -224,8 +331,9 @@ A 組的贏家 AdaIN-local 比 LN-Post 多 33% 參數,還多一條輸入重注�
 > **初始 block ratio 沒有預測力 —— 而且「它不預測」本身就是一個結果。** 最平坦的 DeepNorm(0.99)
 > 解掉、最不平坦的 Pre-LN(4.71)也解掉、Post-LN(1.82)夾在中間卻卡死;AdaIN 與 AdaIN-local 的
 > 初始 ratio **完全相同**(37.52),結果卻是 4.1494 對 0.0088。更乾淨的反例見 §5.4:純重注入是
-> zero-init 的,**step 0 時與 Post-LN 逐元素相同**,結果卻是 15/15 對 0/15。**兩個在初始化時無法
-> 區分的模型,trainability 可以完全相反** —— 任何純粹由初始化狀態算出的指標,原則上都不可能預測這個差異。
+> zero-init 的,配對版裡同一顆種子下,它與 Post-LN 的 260 個共有張量和 step-0 logits **逐位元相同**,
+> 結果卻是 15/15 對 0/15。**兩個在初始化時無法區分的模型,trainability 可以完全相反** —— 任何純粹由
+> 初始化狀態算出的指標,原則上都不可能預測這個差異。
 
 > **WN(無 activation normalization)不列入主表**:最終 loss 4.077 ± 0.011(attention 停在 baseline),
 > 但失敗同時混雜**前向尺度爆炸**(初始 loss ≈ 120,logits 溢出)與**反向梯度放大**。兩個效應無法分離,
@@ -257,8 +365,9 @@ A 組的贏家 AdaIN-local 比 LN-Post 多 33% 參數,還多一條輸入重注�
 
   lr = 1e-4 時 Post-LN 逐種子是 [1.622, 0.906, 1.059]、attention 達 [0.365, 0.455, 0.409] ——
   它**確實學會了使用 attention**,只是收斂品質遠差於 Pre-LN,所以「Post-LN 完全卡死」只在
-  lr ≥ 3e-4 成立。同一張表也顯示 **H3 的救援效果在 lr = 1e-4 上不存在甚至反向**(2.793 vs 1.196);
-  15 種子下 `adain_loc` 在該 lr **0/15** 逃脫、中位數 4.152。
+  lr ≥ 3e-4 成立。同一張表也顯示 **AdaIN-local 的救援效果在 lr = 1e-4 上不存在甚至反向**(2.793 vs 1.196);
+  15 種子下 `adain_loc` 在該 lr **0/15** 逃脫、中位數 4.152。**這是 AdaIN-local 的邊界,不是純重注入的**:
+  純重注入在同一個 lr 仍是 15/15(§5.4 (e))。
 - **Granularity ablation 的三方對照乾淨利落**:AdaIN(global pooling)3/3 卡死;AdaIN-local
   (唯一差別 = 不 pooling)3/3 收斂;SPADE(per-position + MLP)部分逃脫且變異大。
   15 種子下是 **0/15 對 9/15**,Fisher exact 雙尾 **p = 0.0007**。
@@ -327,10 +436,12 @@ held-out n-gram baseline(train split 估計、val split 評估):
 
 3. **modk 劃出條件重注入(H3)的邊界 —— 其效果具有任務相依性。** 在需要精確 16 步對位的 long-range
    任務上,A 組全數失敗(皆為隨機水準、attention 為 baseline 0.028),包括在 copy 上逃脫的
-   AdaIN-local 與 SPADE:per-position 的條件重注入不能代替 attention head 形成精確的長距離對位。
-   而且條件路徑在 modk 上**從頭到尾根本沒有啟用**(全程最大佔比:AdaIN 0.0082 / AdaIN-local 0.0850
-   / SPADE 0.0198)—— 不是「送了梯度但不夠用」,而是「壓根沒送」。這是「bypass 佔比是結果不是原因」
-   的直接證據。僅有 identity-shortcut 類的 placement 取得進展,但**變異是全專案最大的**:
+   AdaIN-local 與 SPADE。而且 AdaIN 系的條件路徑在 modk 上**從頭到尾根本沒有啟用**(全程最大佔比:
+   AdaIN 0.0082 / AdaIN-local 0.0850 / SPADE 0.0198)—— 不是「送了梯度但不夠用」,而是「壓根沒送」。
+   這是「bypass 佔比是結果不是原因」的直接證據。**純重注入也救不起來**:15 顆配對種子 0/15,與 Post-LN
+   逐種子最多差 0.00013(`results/threats_modk/`,§5.4 (e))。為什麼 modk 救不起來還沒有答案 ——
+   「per-position 的重注入只給每個位置它自己的內容,不能代替 attention 做 16 格的對位」說得通,但沒有被測過。
+   僅有 identity-shortcut 類的 placement 取得進展,但**變異是全專案最大的**:
 
    | 配置 | per-seed 最終 loss | 報成 |
    |---|---|---|
@@ -359,12 +470,24 @@ solution**(char_lm 上就是 unigram)。**一個從不成功的模型無法驗�
 
 三個任務都幾乎一致,而且**兩者都收斂**。這才是該預測的有效檢驗,結論與 §2.2 的推導一致。
 
-### 5.4 機制實驗一:AdaIN-local 逃脫的機制是正向 per-position re-injection
+### 5.4 機制實驗一:救援來自正向重注入的 token 內容,反向旁路非必要
 
-§2.4 指出 `cond = x.clone()` 同時開了正向與反向兩條路。兩個對照把它們拆開,結論是
-**起作用的是正向重注入,反向 gradient bypass 非必要,乘性調變也非必要**。
+§2.4 指出 `cond = x.clone()` 同時開了正向與反向兩條路。這一節把它們拆開,結論是
+**救援來自正向重注入的 token 內容;反向 gradient bypass 會加速,但不是必要的;乘性調變與條件容量也都不是必要的**。
+這一節就是 TAAI 2026 論文的內容(英文摘要與對照表見最上方 Paper 一節)。(b) 之後的數字都來自**配對版**
+`results/reinject_n15_paired/`(15 顆配對種子,`--deterministic`)與 2026-09 用同一批種子的補跑。
 
-**(a) 切斷反向 bypass:逃脫率完全不變。** `cond` detach 後正向逐位元保留、`cond.grad` 恆為 None:
+**(0) 配對設計(2026-08-28 修正)。** zero-init 的用意是讓掛上重注入的模型在 step 0 與 Post-LN 是
+**同一個函數**,單一變因就是「有沒有這條路徑」。但舊版程式裡,`nn.Linear` 的建構子會先抽 RNG、之後才被歸零
+—— 同一顆種子下,後面的主幹權重整批錯開(舊程式實測:260 個共有張量中 91 個不同)。修正後,零初始化的層用
+`nn.utils.skip_init` 建立,真正需要隨機初始化的層(MLP 變體的第一層、SPADE 的共享 MLP)用
+`torch.random.fork_rng` 包住,兩者都不再推進全域 RNG。現在同一顆種子下,重注入系與 `ln_post` 的
+260 個共有張量、step-0 logits 逐位元相同,資料序列也相同(`python check_pairing.py`)。因為兩個 arm
+是配對樣本,檢定改用 **McNemar**(Fisher exact 的獨立性前提不成立)。AdaIN 系把 LN 換成 IN,step 0
+本來就不是同一個函數,修正只保證它們的主幹權重相同。修正之前的舊批次(`results/reinject_n15/`、
+`results/h3_n15/` 等)**不是配對的**;下面 (a) 用的就是舊批次,留作研究紀錄。
+
+**(a) 切斷反向 bypass:AdaIN-local 的逃脫率不變(舊批次)。** `cond` detach 後正向逐位元保留、`cond.grad` 恆為 None:
 
 | 配置 | forward per-position | gradient bypass | 解掉(loss < 0.1,15 種子) |
 |---|:--:|:--:|---:|
@@ -377,42 +500,117 @@ solution**(char_lm 上就是 unigram)。**一個從不成功的模型無法驗�
 (AdaIN-local 第 1010 步、SPADE 第 1363 步)—— 同步性是真的,但那是伴隨現象,不是原因。這個干預是
 **乾淨的單一路徑消融**(沒有動 loss、optimizer 或任何前向計算),null 可直接解讀。
 
-**(b) 純重注入對照:拿掉全部乘性調變,效果反而更好。** Post-LN 完全不變(一般 LayerNorm、零乘性
-調變),只在每個 norm 點把 embedding 經一個 zero-init 線性投影加回殘差流:
+**(b) 純重注入:配對版主結果。** Post-LN 完全不變(一般 LayerNorm、零乘性調變),只在每個 norm 點
+把 embedding 經一個 zero-init 線性投影(d×d 加 bias,每點 16,512 個參數)加回殘差流:
 
 $$x \leftarrow \mathrm{LN}(x + \mathrm{attn}(x)) + W_a(\mathrm{cond}), \qquad
   x \leftarrow \mathrm{LN}(x + \mathrm{ff}(x)) + W_b(\mathrm{cond})$$
 
-zero-init 讓它在 step 0 與 Post-LN **逐元素相同**(閘門實測 max|Δ| = 0.00e+00),所以單一變因就是
-「有沒有重注入」。copy、16 層、1500 步、lr 3e-4、15 種子:
+copy、16 層、1500 步、lr 3e-4、15 顆配對種子(論文的表格由 `make_table2.py` 從 `metrics.json` 直接產生,
+這裡是同一組數字):
 
-| 配置 | 條件模組參數/norm 點 | 解掉(< 0.1) | 中位數 | attn→前一格 |
-|---|---:|---:|---:|---:|
-| Post-LN | — | **0/15** | 4.1621 | 0.063 |
-| AdaIN-local(逐位置乘性調變) | 33,024 | 9/15 | 0.0258 | 0.272 |
-| **純重注入(加性,無調變)** | **16,512** | **15/15** | **0.0024** | 0.230 |
-| **純重注入 + bypass 切斷** | 16,512 | **15/15** | 0.0045 | 0.231 |
+| 配置 | 條件參數/norm 點 | 解掉(< 0.1) | McNemar p(對 Post-LN) | loss 中位數 | 逃脫步數中位數 | attn→t−1 |
+|---|---:|---:|---:|---:|---:|---:|
+| Post-LN | — | **0/15** | — | 4.1621 | — | 0.066 |
+| AdaIN-local(逐位置乘性調變) | 33,024 | 9/15 | 0.0039 | 0.0771 | 1373 | 0.265 |
+| **純重注入(加性,無調變)** | **16,512** | **15/15** | **6.1e-5** | **0.0025** | 561 | 0.252 |
+| **純重注入 + bypass 切斷** | 16,512 | **15/15** | 6.1e-5 | 0.0051 | 773 | 0.248 |
+| 純重注入(MLP,條件參數對齊 AdaIN-local) | 33,024 | **15/15** | 6.1e-5 | 0.0025 | 496 | 0.319 |
 
-* **15/15 vs AdaIN-local 的 9/15:Fisher exact p = 0.0169。** 用**一半**的條件參數、**零乘性調變**,
-  不只達到同樣效果,而是**更好且幾乎零變異**(15 顆種子全落在 0.0022~0.0027)。
-  **「調變容量」的替代解釋因此被排除:參數更少的那個贏了。**
-* **切斷反向 bypass 後仍 15/15**(p = 1.0000),attention 照樣成形(0.231 vs 0.230)。這一格是事前
-  計畫之外追加的:實測 `post_reinject` 的 cond/trunk 佔比是 **172.63**,而 AdaIN-local 只有 **6.34**
-  —— 差了 27 倍,把 (a) 的結論直接套過去是外推。補了這一格,才能說「機制是正向重注入」,
-  而不只是「純重注入足以救活 Post-LN」。
-* **干預真的被用到**:480 個 norm 點(15 種子 × 32)的重注入權重 Frobenius 範數,最小 0.3308、
-  中位數 1.6356 —— zero-init 的起點是 0,所以它確實被學起來用。
+attn 是新口徑(§4.4),15 顆的平均;初始化時是 0.065–0.068。6.1e-5 = 2 × 0.5¹⁵,是 15 對種子能達到的最小 p 值。
 
-> **結論:AdaIN-local 逃脫的機制是條件路徑的正向 per-position re-injection。** 乘性調變不是必要的,
-> 反向 gradient bypass 也不是必要的 —— 把 embedding 加性地送回每一層就夠了,而且更可靠。
-> AdaIN 卡死的正確解釋也跟著換:不是「bypass 在結構上存在但 optimizer 不用它」,而是
-> **mean pooling 摧毀了正向的 per-position 資訊**(實測 AdaIN 的 cond/trunk 僅 0.0025,
-> 旁路確實幾乎沒啟用,但那是結果不是原因)。
+* **0/15 對 15/15。** 同一顆種子、step 0 逐位元相同的兩個模型,一個全部停在隨機水準(ln 64 ≈ 4.159),
+  一個全部解掉。
+* **切斷反向 bypass 後仍 15/15,但每一顆種子都變慢。** 逐種子配對,15 顆全部比同種子的重注入慢 176–294 步
+  (符號檢定 p = 6.1e-5;逃脫步數中位數 773 對 561)。把「逃脫步數」的閾值在 0.05–2.0 之間取 400 個值逐一
+  重算,每個閾值都是 15 顆全慢,所以不是閾值挑出來的。**反向旁路有幫助,但不是必要的** —— 這也順帶證明
+  detach 真的切斷了東西。
+* **detach 切掉的是什麼要講精確。** 它切掉的是 $\partial L/\partial\,\mathrm{cond} = \sum_i W_i^\top g_i$
+  ($g_i$ 是第 i 個 norm 點輸出的梯度):從每個 norm 點跳過中間所有 LN、直接流回 embedding table 的那一項。
+  $W_a, W_b$ 自己的參數梯度照樣存在,32 個投影在切斷版裡照樣在學(每一個的權重範數都離開 0)。所以這裡
+  檢驗的是 B2T 那**一類理由**(「多了一條與 LN 導數無關的梯度路徑,所以梯度傳得下去」),不是 B2T 的架構:
+  本專案的旁路梯度只流進 embedding,B2T 的加在每一層的主幹上。
+* **乘性調變與條件容量都不是必要的。** MLP 版的條件參數與 AdaIN-local 完全相同(33,024),15/15。
+  AdaIN-local **不是因果對照** —— 它同時把 LN 換成了 IN,所以純重注入贏過它不能讀成「調變有害」,
+  只能說「調變不必要」。
+* **干預真的被用到,而且主要用在頂部。** 480 個 norm 點(15 種子 × 32)的重注入權重 Frobenius 範數
+  最小 0.29、中位數 1.62(zero-init 的起點是 0)。四種能救的變體(完整、切斷、MLP、只有 token)
+  頂部 8 個 norm 點的範數(跨種子中位數)是底部 8 個的 6.9–17.9 倍,逐種子看 15/15 顆都是頂部大於底部
+  (`python analyze_layer_attn.py --wnorm-only`)。
+* **(舊批次)為什麼一定要補 detach 這一格。** 配對修正之前,seed 0 的 `post_reinject` cond/trunk 佔比是
+  **172.63**,AdaIN-local 只有 **6.34** —— 差了 27 倍,把 (a) 的結論直接套到純重注入是外推。
+  (梯度分解只存了 seed 0,不代表 15 顆;配對版的 seed 0 對 AdaIN-local 恰好是沒逃脫的那顆,
+  所以這組數字沒有在配對版重算。)
 
-**適用範圍(必須跟結論一起讀)**:單一任務 × 單一深度 × 單一 learning rate。modk 上 AdaIN-local 與
-SPADE 全部卡死(§5.2 第 3 點);lr = 1e-4 下 AdaIN-local **0/15** 逃脫、中位數 4.152,幾乎完全失效
-—— 該 lr 下 `adain_loc_detach` 同樣 0/15(Fisher p = 1.0000),所以「切斷 bypass 會不會變差」在那個
-區間**無法檢驗**:基線本身不逃脫,就沒有下降空間。
+**(c) E2:重注入的是 token 內容,不是位置。** `cond = x.clone()` 裡的 `x` 同時是 token embedding 與
+position embedding,所以「正向重注入」還分不出重注入的是內容還是乾淨的位置訊號 —— 對 copy 特別要緊,
+解題要學會 −1 的 offset,位置訊號本身有可能就是關鍵。三個配置只換 `cond` 的來源,其餘與純重注入完全相同:
+
+| `cond` 來源 | 內容 | 位置 | 可學 | 解掉 | loss 中位數 | attn→t−1 | 重注入權重範數中位數 |
+|---|:--:|:--:|:--:|---:|---:|---:|---:|
+| `tok + pos`(`post_reinject`) | ✓ | ✓ | ✓ | **15/15** | 0.0025 | 0.252 | 1.623 |
+| `tok`(`post_reinject_tok`) | ✓ | ✗ | ✓ | **15/15** | 0.0022 | 0.278 | 1.539 |
+| `pos`(`post_reinject_pos`) | ✗ | ✓ | ✓ | **0/15** | 4.1621 | 0.066 | 0.234 |
+| 凍結的隨機 per-position 向量(`post_reinject_rand`) | ✗ | ✓ | ✗ | **0/15** | 4.1621 | 0.067 | 0.234 |
+
+* **救援需要 token 內容。** 只有內容一樣 15/15;只重注入位置訊號,與什麼都不做無法區分 —— 逐種子 loss
+  與 Post-LN 最多差 0.00052。
+* **「只是多了參數」也被排除。** `pos` 與凍結隨機向量加的參數與重注入完全相同(528,384),卻 0/15。
+  它們的投影權重也有在長(範數中位數 0.234,同一張表裡能救的兩列是 1.54 與 1.62),所以不是最佳化失敗,
+  而是那條路徑始終沒變得有用。
+* **但不能說「完全」來自內容。** `tok` 有 4 顆種子停在 0.01–0.045(完整版最大 0.0032)。這個差距不顯著
+  (閾值 0.01 下的配對 McNemar p = 0.125),所以也不能說位置訊號有幫助 —— 正確的說法是「需要內容」。
+* **和 detach 合起來剛好是 2×2**:
+
+  | | 有旁路梯度流回 embedding | 沒有旁路梯度 |
+  |---|---|---|
+  | **前向有 token 內容** | `tok + pos` 15/15、`tok` 15/15 | `tok + pos` + detach **15/15** |
+  | **前向沒有 token 內容** | `pos` **0/15**(梯度回到 pos table) | 凍結隨機向量 **0/15**(buffer,沒有梯度) |
+
+  **救不救得起來只跟前向的 token 內容走,旁路梯度只影響快慢。** 唯一的缺口:`pos` 的旁路梯度流回的是
+  pos table,不是 token table;「旁路梯度流回 token table、但前向沒有 token 內容」這一格沒有乾淨的做法。
+
+**(d) 判準穩健性。** 主要對照(Post-LN 0/15 對重注入 15/15,含 detach 與 MLP)在「解掉」閾值 0.01–2.0
+之間完全不變。但 AdaIN-local 對判準敏感(閾值 0.01 時 4/15、1.0 時 10/15),`tok` 在 0.01 時是 11/15
+—— 穩健性只對主要對照成立。
+
+**(e) 適用範圍(必須跟結論一起讀)。** 2026-09-10 用同樣 15 顆配對種子補跑(「部分進展」= loss 比隨機水準
+低 0.1 以上):
+
+* **換 learning rate:救援還在。** lr = 1e-4(copy)時重注入 **15/15**(loss 0.008–0.011),Post-LN
+  **0/15**(McNemar p = 6.1e-5)。Post-LN 在這個 lr 不再停在隨機水準:15 顆全部有部分進展(0.82–3.70,
+  中位數 1.06),attention 也成形(0.346),但沒有一顆解掉(`results/threats_lr1e-4/`)。
+* **換任務:救援不在。** modk 上重注入 **0/15**,與 Post-LN 逐種子最多差 0.00013,連部分進展都沒有;
+  正對照 Pre-LN 也沒有解掉,但 **12/15 有部分進展**(McNemar p = 4.9e-4)—— 所以不是「這個任務在預算內
+  沒人解得開」,而是重注入在這裡確實沒幫上忙(`results/threats_modk/`)。為什麼,還沒有答案。
+* **AdaIN-local 的邊界不同。** lr = 1e-4 下 AdaIN-local **0/15**、中位數 4.152,切斷版同樣 0/15
+  (舊批次,Fisher p = 1.0000),所以「切斷 bypass 會不會變差」對 AdaIN-local 在那個區間無法檢驗;
+  modk 上 AdaIN-local 與 SPADE 全部卡死(§5.2 第 3 點)。
+* **旁路梯度只流進 embedding**(見 (b))。B2T 那種加在主幹 Jacobian 裡的旁路是否也不必要,**沒有測**。
+* **單一任務家族、單一深度(16 層)、單一台機器。**
+
+**(f) 兩條解題路線的 attention 不一樣。** 同一批次、同一個統計量(新口徑)、15 顆種子:Pre-LN 的 t−1
+attention 是 **0.786**、DeepNorm **0.938**,重注入只有 0.252(只有 token 時 0.278)—— 同樣把 copy 解掉,
+path-repair 型大約是條件重注入型的三倍。9/16 重跑 7 個配置、逐種子存下逐層值(`results/layer_attn_n15/`,
+final loss 與 attention 跟配對版逐種子完全相同):
+
+| 配置 | t−1 attention 最強的層(15 顆種子的範圍) |
+|---|---|
+| 純重注入 | 12–16 |
+| 純重注入 + bypass 切斷 | 14–16 |
+| 純重注入(MLP) | 16 |
+| 只有 token | 14–16 |
+| Pre-LN | 1 |
+| DeepNorm | 6–9 |
+
+重注入把 t−1 attention 放在頂部,每一顆種子都是;Pre-LN 放在第 1 層,DeepNorm 在中間。但**不是「只在頂部」**:
+逐種子看,純重注入的 attention 超過 0.15 的最低層落在第 5–14 層。「重注入讓頂部幾層直接拿注入的 token 內容
+解 copy,下面的主幹沒有被修好」這個解讀說得通,與 E2、權重集中在頂部、modk 救不起來都一致,但沒有直接測過。
+
+> **結論:救援來自正向重注入的 token 內容。** 反向 gradient bypass 會加速,但不是必要的;乘性調變、
+> 條件容量、多出來的參數都不是原因。AdaIN 卡死的解釋也跟著換:不是「bypass 在結構上存在但 optimizer
+> 不用它」,而是 **mean pooling 把每個位置自己的 token 內容平均掉了**(舊批次實測 AdaIN 的 cond/trunk
+> 僅 0.0025,旁路確實幾乎沒啟用,但那是結果不是原因)。
 
 ### 5.5 機制實驗二:拉平逐層梯度「大小」不足以救活 Post-LN
 
@@ -520,23 +718,25 @@ activation 尺度、反向梯度尺度與殘差權重比例,剩下的兩個候�
 
 **H3(granularity 是關鍵)— 假設成立,機制已由直接對照確定(§5.4)。** granularity 是關鍵變因:
 AdaIN(global pooling)0/15 對 AdaIN-local(唯一差別 = 不 pooling)9/15,Fisher exact **p = 0.0007**,
-對照鏈完整(IN 0/10 → AdaIN 0/15 → AdaIN-local 9/15)且後兩者精確等參數。機制則是**正向的
-per-position re-injection**,不是反向的 gradient bypass:純加性、零調變、只有一半條件參數的重注入
-15/15 解掉(p = 0.0169),切斷反向 bypass 後仍 15/15 —— **「調變容量」與「反向 bypass」兩個伴隨
-解釋同時被排除。** 剩餘未解耦的因素:SPADE 額外的共享 MLP 似乎讓逃脫更不穩定,原因未探究;
-且 SPADE 坐在分岔點上(§7 第 7 點),不承載 H3 的結論。
+對照鏈完整(IN 0/10 → AdaIN 0/15 → AdaIN-local 9/15)且後兩者精確等參數。機制則是**正向重注入的
+token 內容**,不是反向的 gradient bypass(配對版,§5.4):純加性、零調變的重注入 15/15 解掉(對 Post-LN
+的 McNemar p = 6.1e-5);切斷反向 bypass 後仍 15/15,只是每顆種子都變慢;條件參數與 AdaIN-local 相同的
+MLP 版 15/15;只重注入位置訊號則 0/15 —— **「反向 bypass」「調變容量」「多出來的參數」三個替代解釋
+都被排除,而且要的是 token 內容,不是位置。** 剩餘未解耦的因素:SPADE 額外的共享 MLP 似乎讓逃脫
+更不穩定,原因未探究;且 SPADE 坐在分岔點上(§7 第 7 點),不承載 H3 的結論。
 
 **H4(attention 不可繞過)— 成立,但正確的表述是「必要而非充分」。** 所有逃脫的 run,attention 對
-目標位置的權重都遠高於 uniform baseline(copy:SPADE 0.24~0.32、AdaIN-local 0.24~0.39、Pre-LN 0.61、
-DeepNorm 0.91;modk:有進展的 Sandwich / Pre-LN 達 0.44 / 0.39,baseline 0.028;char_lm:收斂的
-placement 達 0.25~0.37,Post-LN / RMS 停在 0.061),所有卡死的 run 都停在 baseline。
+目標位置的權重都遠高於 uniform baseline(舊口徑,§4.4。copy:SPADE 0.24~0.32、AdaIN-local 0.24~0.39、
+Pre-LN 0.61、DeepNorm 0.91;modk:有進展的 Sandwich / Pre-LN 達 0.44 / 0.39,baseline 0.028;char_lm:
+收斂的 placement 達 0.25~0.37,Post-LN / RMS 停在 0.061),所有卡死的 run 都停在 baseline。
 **關鍵證據是切斷 bypass 的那一組 attention 照樣成形** —— 在完全沒有 gradient bypass 的情況下解掉了題,
 所以這個結論不依賴任何關於 AdaIN 的推論;這與 H3 的機制不衝突:**重注入讓模型訓練得起來,attention
 仍然負責跨位置搬運。** 但 h3_n15 的 45 個 run(3 配置 × 15 種子)顯示**兩個分佈是重疊的**:解掉的
 18 個 attention 落在 0.237~0.573,卡死的 27 個落在 0.059~0.340 —— AdaIN 有 run 形成了 0.34 的
 attention 卻仍然卡死。所以正確的表述是**「attention 成形是解題的必要條件,不是充分條件」**,不能說
 兩個分佈可以用 attention 權重分開;H4 的結論不受影響,它靠的是「解掉的 run 全部遠高於 baseline」
-與「切斷 bypass 後 attention 照樣成形」。
+與「切斷 bypass 後 attention 照樣成形」。配對版再補一件事:兩種解法的 attention 不只大小不同,位置也不同
+—— 重注入的 t−1 attention 最強在第 12–16 層,Pre-LN 在第 1 層,15 顆種子都是(§5.4 (f))。
 
 ### 6.2 用 gradient flow 重新分類
 
@@ -545,9 +745,9 @@ attention 卻仍然卡死。所以正確的表述是**「attention 成形是解�
 | 分類 | 方法 | 行為特徵 |
 |---|---|---|
 | **通路修復型(path-repair)** | Pre-LN、RMSNorm (Pre)、Sandwich-LN、DeepNorm | identity shortcut 或等效縮放;**在 copy 上**跨種子零變異、快速收斂 |
-| **條件重注入型(conditional re-injection)** | 純重注入(15/15)、AdaIN-local(9/15)、SPADE(部分種子) | 主幹仍堵塞,但每層直接讀到乾淨的 per-position embedding。**切斷反向 bypass 後逃脫率不變**;**乘性調變不是必要的** |
+| **條件重注入型(conditional re-injection)** | 純重注入(15/15)、AdaIN-local(9/15)、SPADE(部分種子) | 主幹仍堵塞,但每層直接讀到乾淨的 per-position embedding。**要的是 token 內容**(只重注入位置 0/15);**切斷反向 bypass 後逃脫率不變**(只是變慢);**乘性調變不是必要的**;copy 上 t−1 attention 集中在頂部幾層 |
 | **統計補償型(statistics-compensation)** | BN、GN、IN | 改變失衡的形狀與幅度,不可靠。10 種子下 BN 有 1/10 **完全解掉**(0.002)、GN 0/10、IN 0/10 |
-| **無效型(ineffective)**(**限 lr = 3e-4**) | Post-LN、RMSNorm (Post)、AdaIN(per-position 資訊被 pooling 摧毀)、WN(前向/反向尺度皆失控) | 跨種子穩定地卡在隨機水準。**但 Post-LN 在 lr = 1e-4 下會逃到 1.20 且 attention 成形** |
+| **無效型(ineffective)**(**限 lr = 3e-4**) | Post-LN、RMSNorm (Post)、AdaIN(per-position 資訊被 pooling 摧毀)、WN(前向/反向尺度皆失控) | 跨種子穩定地卡在隨機水準。**但 Post-LN 在 lr = 1e-4 下有部分進展(3 種子平均 1.20)且 attention 成形,只是沒有解掉(15 種子 0/15)** |
 
 兩個限定:**「跨種子零變異」只在 copy 上成立**(modk 上 B 組是全專案變異最大的一群);
 **「無效型」是 lr 相依的**。分類表的行為特徵應理解為任務與 lr 相依的描述。
@@ -559,45 +759,68 @@ H1、H2 的核心結論(Post-LN 的 gradient path 病灶、Pre-LN 的 identity s
 本專案做的是用一個乾淨的合成任務把這些理論**重現並視覺化**,不是新知識。自行設計的部分是四個補充
 對照:**(1)** 把 BN / IN / GN / AdaIN / SPADE / WN 這些跨領域方法放進**同一個受控框架**同框對照;
 **(2)** 用 **gradient decomposition** 把「條件路徑載了多少梯度」從概念變成可量測的量;
-**(3)** 用 AdaIN / AdaIN-local / AdaIN-local-detach / 純重注入的**多方 causal ablation** 孤立
-「條件 granularity」與「正向 vs 反向路徑」兩個變因;**(4)** 用 **attention probe** 檢驗「繞過
-attention」的替代解釋。其中 (3) 是留下來最實在的一項 —— 它**排除了**一個看似合理、而且有強相關性
-支持的機制假說,並用一個更簡單的干預給出肯定式的替代答案。這些屬於探索性的延伸量測,結論的外推性
-受 §7、§8 所列限制約束。
+**(3)** 用 AdaIN / AdaIN-local / AdaIN-local-detach / 純重注入(配對種子)的**多方 causal ablation**,
+加上 E2 的內容 / 位置分解,孤立「條件 granularity」「正向 vs 反向路徑」與「重注入的是什麼」三個變因;
+**(4)** 用 **attention probe** 檢驗「繞過 attention」的替代解釋。其中 (3) 是留下來最實在的一項 —— 它
+**排除了**一個看似合理、而且有強相關性支持的機制假說,並用一個更簡單的干預給出肯定式的替代答案。
+這些屬於探索性的延伸量測,結論的外推性受 §7、§8 所列限制約束。
+
+**(3) 這一項與文獻的關係(也就是 TAAI 論文的定位)。** 「每一層加回 embedding」或「加一條繞過
+normalization 的連接」本身不是新東西:B2T connection(Takase et al., 2023)在層內加一條繞過 LN 的連接;
+DenseFormer(Pagliardini et al., 2024)在每個 block 後,對包含 embedding 輸出 X₀ 在內的所有前層表徵
+取加權平均,本專案的純重注入是這個家族裡最小的成員(只取 X₀、純加性、零初始化);looped /
+recurrent-depth 模型的 input injection(例如 McLeish et al., 2024)也是每一層把 embedding 加回去。
+不同的是**對「為什麼有用」的檢驗**:B2T 用反向的理由解釋它的連接(導數裡多了一個與 LN 導數無關的
+單位矩陣,所以梯度傳得下去),但這種連接同時也把資訊往前送。據我們所知,還沒有研究把這兩個方向分開,
+去檢驗繞過 normalization 的連接為什麼救得回訓練;本專案用配對種子加 detach 做了這件事,結論是反向
+不是必要的。範圍要講清楚:本專案的旁路梯度只流進 embedding,B2T 的加在每一層的主幹上,所以測的是
+B2T 那**一類理由**,不是 B2T 的架構。
+
+其他相關工作:Xu et al. (2019) 用 detach 分開的是 **LayerNorm 本身**的前向與反向,結論是反向比較重要
+—— 對象不同,結論剛好形成對照。ReZero(Bachlechner et al., 2021)用一個零初始化的**純量**去縮放既有的
+殘差分支;這裡是新增一條從 embedding 出發的路徑,每個 norm 點一個 d×d 矩陣。Admin(Liu et al., 2020)
+指出逐層梯度失衡不是 Post-LN 訓練困難的根本原因(他們歸因於 amplification effect),與 §5.5 的
+GradRenorm null 方向一致。
 
 ### 6.4 總結
 
 在本實驗的範圍(三個小規模任務、16 層;主表 3 種子,H3 那條線 15 種子)內,證據與以下觀點一致:
 **不同 normalization 方法對 trainability 的影響差異,更多來自殘差流的結構 —— identity shortcut、
 殘差縮放、per-position 條件重注入 —— 而非特徵分布的統計性質本身**。跨任務驗證進一步劃出邊界:
-placement 效應在合成探針與真實資料上都重現;條件重注入的救援只在短距離、per-position 任務上成立,
-任務難度提高時,identity shortcut 是唯一在預算內有進展的通路設計。
+placement 效應在合成探針與真實資料上都重現;條件重注入的救援在 copy 上跨兩個 lr(3e-4、1e-4)成立,
+換成 modk 就不成立;任務難度提高時,identity shortcut 是唯一在預算內有進展的通路設計。
 
-**但「結構透過什麼路徑起作用」尚未確定,而且原本最被看好的答案已被排除。** 所以本專案應理解為對
-既有文獻**現象**的重現,而非對其**機制**的證明 —— 而且它額外排除了一個看似最自然的機制解釋。
+**對 placement(H1)來說,「結構透過什麼路徑起作用」尚未確定,而且原本最被看好的答案已被排除。**
+所以這部分應理解為對既有文獻**現象**的重現,而非對其**機制**的證明 —— 而且它額外排除了一個看似最自然的
+機制解釋。條件重注入(H3)則不同:它有肯定式的答案(下面第 1 項)。
 
 **本專案資料支持強度最高的,是以下五項具體結果**(依證據強度排序;每一項的數字都由
 `verify_doc_numbers.py` 對回原始資料重算):
 
-1. **AdaIN-local 逃脫的機制是正向 per-position re-injection(肯定式結果)。** 純加性、零乘性調變、
-   只有一半條件參數的重注入 **15/15** 解掉(AdaIN-local 9/15,p = 0.0169),切斷反向 bypass 後
-   **仍然 15/15**(p = 1.0000)。同時排除了「調變容量」與「反向 bypass」兩個伴隨解釋。(§5.4)
-2. **反向 gradient bypass 對逃脫「非必要」。** 佔比從 0 暴增到 0.98、與 loss 跳水同步到同一個 probe
-   點,但完全切斷後逃脫率一點都沒變(9/15 對 9/15,p = 1.0),連解掉者的中位數都相同。(§5.4)
+1. **救援來自正向重注入的 token 內容(肯定式結果)。** 配對版中,同一顆種子、step 0 逐位元相同的兩個
+   模型,Post-LN **0/15**、加上零初始化的加性重注入 **15/15**(McNemar p = 6.1e-5);只重注入 token 內容
+   15/15,只重注入位置訊號或凍結隨機向量 0/15(參數量完全相同);條件參數與 AdaIN-local 相同的 MLP 版
+   15/15。「調變容量」與「多出來的參數」兩個替代解釋同時被排除。(§5.4)
+2. **反向 gradient bypass 對逃脫「非必要」,但有幫助。** 純重注入切斷反向 bypass 後仍 **15/15**,只是
+   15 顆種子全都慢了 176–294 步(p = 6.1e-5)。AdaIN-local 的旁路佔比從 0 暴增到 0.98、與 loss 跳水
+   同步到同一個 probe 點,但完全切斷後逃脫率一點都沒變(9/15 對 9/15,p = 1.0,舊批次)。(§5.4)
 3. **條件必須攜帶逐位置資訊。** 0/15 對 9/15,p = 0.0007,對照鏈完整且後兩者精確等參數。(§5.1)
 4. **跨位置搬運由 attention 完成,但 attention 成形是必要而非充分。** 解掉的 18 個 run attention
-   落在 0.237~0.573,全部遠高於 baseline 0.059;卡死的 27 個落在 0.059~0.340,**兩個分佈重疊**。(§6.1)
+   落在 0.237~0.573,全部遠高於 baseline 0.059;卡死的 27 個落在 0.059~0.340,**兩個分佈重疊**。
+   兩種解法的 attention 也放在不同的層:重注入在頂部(12–16 層),Pre-LN 在第 1 層。(§6.1、§5.4 (f))
 5. **拉平逐層梯度大小不足以救活 Post-LN。** 崩塌是真的、可以被完全阻止、而阻止它之後結果毫無改變
    (兩種 optimizer、三個 lr);有 headroom 的 lr = 1e-4 區間 15 種子下 p = 0.4553;干預對健康模型
    無害(DeepNorm 加上它反而變好 3.21 個數量級)。(§5.5)
 
 > **兩個否定結果(第 2、5 項)的證據強度不對等,不該並列。** 第 2 項的 `cond` detach 是**單一路徑
-> 消融**:沒有動 loss、optimizer 或任何前向計算,null 可以直接解讀成「那條路徑沒有因果貢獻」。
+> 消融**:沒有動 loss、optimizer 或任何前向計算,null 可以直接解讀成「那條路徑對『能不能解掉』沒有
+> 因果貢獻」(對速度有,見 §5.4 (b))。
 > 第 5 項的 `GradRenorm` 則**換掉了 optimizer 看到的整個更新規則**,它必須額外證明一件 detach 不需要
 > 證明的事 —— **這個新規則本身不會破壞訓練**;那道對照是 §5.5 的健康對照。
 
 **最後,一句方法論上的觀察** —— 它是討論,不是本專案的主結論:本專案兩次把一個劇烈、同步、機制上
-說得通的量測當成機制(H3 的 bypass、H2 的崩塌),兩次都在直接干預之後被證明不具因果力。
+說得通的量測當成機制(H3 的 bypass、H2 的崩塌),兩次都在直接干預之後被證明不是原因
+(H3 的 bypass 只影響快慢,不決定能不能解掉)。
 **強相關 + 說得通的機制 + 精確的時間同步,仍然不足以支持因果宣稱。**
 
 ## 7. 方法論註記(Threats to Validity)
@@ -638,7 +861,7 @@ placement 效應在合成探針與真實資料上都重現;條件重注入的救
    含 embedding 的比值精準隨 emb_std 反比縮放,排除那一列後幾乎不動 —— 本專案因此改用
    `rms[1]/rms[-1]`;含混淆的欄位仍保留在 `summary.csv` 的 `init_bottom_top_ratio_confounded`,
    因為「這個指標被初始化尺度混淆」本身就是一個發現。**即使換成乾淨指標,它與最終 loss 仍幾乎零相關**
-   (最乾淨的反例是純重注入:zero-init 讓它在 step 0 與 Post-LN 逐元素相同,結果卻是 15/15 對 0/15)
+   (最乾淨的反例是純重注入:配對版裡同一顆種子下,它在 step 0 與 Post-LN 逐位元相同,結果卻是 15/15 對 0/15)
    —— 這一欄的角色是描述初始狀態,不是預測工具。
 
 6. **「前向尺度」與「反向通路」仍未完全解耦 —— 這是本設計最大的歸因缺口。** 所有成功的配置都同時
@@ -670,6 +893,15 @@ placement 效應在合成探針與真實資料上都重現;條件重注入的救
    **訓練 loss 三個任務都完全相同**(該旗標只作用在 probe),但 BN 的初始梯度量測差了兩個數量級。
    主表採用 train 模式的協定,但 **BN 的梯度數字應理解為協定相依,不宜與其他配置直接並列比較**。
 
+10. **前向與反向不能完全分開。** 重注入項 $W_i\,\mathrm{cond}$ 改變了之後每一個 LN 的輸入,也就改變了
+    那些 LN 的 Jacobian(1/σ 那一項)。detach 移除的只是**顯式**的旁路梯度,前向改變間接造成的反向改變
+    仍然存在。所以「反向旁路不必要」指的是那條顯式、流回 embedding 的旁路梯度。
+
+11. **舊資料夾與現在的程式不完全相容。** 兩件事都發生在 2026-08 底:**(a)** 配對修正(§5.4 (0))改變了
+    多了條件模組的配置在同一顆種子下的初始權重,所以用現在的程式重跑 `copy`、`h3_n15`、`reinject_n15`
+    等舊資料夾裡的 AdaIN / SPADE / 重注入配置,逐種子數字不會相同(沒有條件模組的配置不受影響);
+    **(b)** attention 的口徑改成 head-max(§4.4)。舊資料夾保留原樣,作為當時結論的出處。
+
 ## 8. Limitations
 
 * **單一規模。** 任務涵蓋 diagnostic probe(copy)、long-range dependency(modk)與小型真實資料
@@ -678,14 +910,18 @@ placement 效應在合成探針與真實資料上都重現;條件重注入的救
   方向一致,但本專案自身不構成證據。
 * **種子數。** H3 那條線與兩個機制實驗是 15 種子,2×2 解耦是 10 種子,主表其餘配置仍是 3 種子,對
   高變異配置只夠報告現象、不足以估計逃脫機率。
-* **「切斷 bypass 是否會降低逃脫率」在本規模下無法回答。** 能下的結論是「bypass 非必要」(存在性
-  結果,穩固),不包括「bypass 完全無用」—— 要分辨 60% 與 80% 的逃脫率大約需要每組 80 個種子。
+* **「切斷 bypass 會不會降低逃脫率」只對純重注入有答案。** 純重注入切斷後仍 15/15,但每顆種子都變慢
+  (§5.4 (b))。對 AdaIN-local(9/15 對 9/15),能下的結論是「bypass 非必要」(存在性結果,穩固),
+  不包括「bypass 完全無用」—— 要分辨 60% 與 80% 的逃脫率大約需要每組 80 個種子。
+* **單一深度、單一機器。** 重注入的結果只在 16 層、一台機器(RTX 5070)上跑過;8 / 32 層的深度外推
+  與跨機器的可攜性都沒有測(SPADE 這類坐在分岔點上的配置跨機器會翻面,§7 第 7 點)。
 * **「前向表徵」這個候選仍未測,這是最大的歸因缺口。** 逐層梯度「大小」已被排除,「梯度方向 /
   conditioning」已有一次純量測(結果與假設一致但**無法區分因果與症狀**),但「Post-LN 每層重新
   正規化主幹」這個前向候選從未被單獨測試。難點是設計上的:前向與反向綁在同一個 LN 上,拆開本身
   就是設計難題 —— 不是算力問題。
-* **lr 依賴性是實質的。** Post-LN 的「完全卡死」只在 lr ≥ 3e-4 成立;lr = 1e-4 時它會逃到中位數 1.06
-  並形成 attention;H3 的救援效果在該 lr 下也不存在。主表的所有結論都應理解為 lr = 3e-4 下的行為。
+* **lr 依賴性是實質的。** Post-LN 的「完全卡死」只在 lr ≥ 3e-4 成立;lr = 1e-4 時它有部分進展
+  (15 種子中位數 1.06,0/15 解掉)並形成 attention。AdaIN-local 的救援在該 lr 下不存在,純重注入的
+  救援則仍是 15/15(§5.4 (e))。主表的所有結論都應理解為 lr = 3e-4 下的行為。
 * **未涵蓋** warmup、gradient clipping、learning rate schedule 等實務補救手段與 normalization 的
   交互作用。
 * **理論部分**只到 Jacobian 尺度分析的層級,未做 spectral radius / Lipschitz 常數的嚴格推導。
@@ -694,6 +930,10 @@ placement 效應在合成探針與真實資料上都重現;條件重注入的救
   —— run 把自己的輸出寫進已進版控的 `results/` 時 working tree 就髒了,而程式碼一個字都沒改。
   已查證:產生結果的 commit 與收錄結果的下一個 commit 之間沒有任何程式碼變更,且用那些 commit
   的程式碼實跑,10 個配置的 loss 軌跡與已發布結果逐位元相同。現版的快照改在訓練開始前拍。
+* **配對版與之後的結果,provenance 裡沒有 git commit。** `reinject_n15_paired`、`threats_*`、
+  `layer_attn_n15` 是在沒有 git 的資料夾裡跑的,`provenance.json` 記著 `git_commit: null`,程式版本
+  無法從 provenance 回溯。能確認的是:用最終版程式(2026-09-16)重跑的 `layer_attn_n15`,7 個配置的
+  final loss 與 attention 跟 `reinject_n15_paired` 逐種子完全相同(`verify_paper_numbers.py` 會檢查)。
 * **如需要研究報告與額外驗證檔案等請詢問我**
 
 ## 9. 執行方式
@@ -714,6 +954,8 @@ python run_experiment.py --task modk --modk-gap 16        # long-range dependenc
 python run_experiment.py --task char_lm --val-every 100   # 真實資料;定期評估 held-out 驗證集
 ```
 
+**重現 TAAI 論文**(配對版、lr = 1e-4、modk 三組重跑指令,以及不必重訓的檢查)見最上方 Paper 一節。
+
 常用旗標:
 
 ```
@@ -730,10 +972,11 @@ python run_experiment.py --task char_lm --val-every 100   # 真實資料;定期�
 --deterministic       啟用決定性演算法(實測不改變數值)
 ```
 
-> **重跑會得到 22 個配置,主表只列 15 個。** 另外 7 個是診斷對照:`post_ln_st` / `post_ln_gr`
+> **重跑會得到 25 個配置,主表只列 15 個。** 另外 10 個是診斷對照:`post_ln_st` / `post_ln_gr`
 > (§5.5 的解耦,結果在 `results/copy_decouple/` 與 `results/decouple2_*/`)、`post_reinject` /
-> `post_reinject_detach` / `post_reinject_mlp`(§5.4 的純重注入,在 `results/reinject_n15/`)、
-> `pre_ln_gr` / `deepnorm_gr`(§5.5 的健康對照,在 `results/healthy_ctrl_*/`)。
+> `post_reinject_detach` / `post_reinject_mlp` 與 E2 的 `post_reinject_tok` / `post_reinject_pos` /
+> `post_reinject_rand`(§5.4,配對版在 `results/reinject_n15_paired/`,配對修正前的舊批次在
+> `results/reinject_n15/`)、`pre_ln_gr` / `deepnorm_gr`(§5.5 的健康對照,在 `results/healthy_ctrl_*/`)。
 > 若要重現主表,用 `--only` 指定那 15 個 key。
 
 > **`ln_gr` 系配置一定要搭配 `--target-rms`。** 預設值 6.0e-5 是對 **Post-LN** 在 copy 上校準的。
@@ -744,11 +987,15 @@ python run_experiment.py --task char_lm --val-every 100   # 真實資料;定期�
 已初始化)。驗證:
 
 ```bash
-python verify_doc_numbers.py
+python verify_doc_numbers.py     # README 的數字
+python verify_paper_numbers.py   # 論文的數字
+python check_pairing.py          # 配對:各配置與 ln_post 在 step 0 逐位元相同
 ```
 
-`verify_doc_numbers.py` **208 項**,把文件裡的**每一個**關鍵數字對回 `results/` 的原始資料重算 ——
-它是常設清單,不是臨時腳本。
+`verify_doc_numbers.py` **331 項**,把文件裡的**每一個**關鍵數字對回 `results/` 的原始資料重算 ——
+它是常設清單,不是臨時腳本。`verify_paper_numbers.py` 對論文正文、表格與 caption 做同一件事(34 項)。
+其他分析腳本:`make_table2.py`(從 `metrics.json` 產生論文的表格)、`analyze_layer_attn.py`
+(逐層 attention 與重注入權重的深度剖面,§5.4 (f))、`paper/make_figs.py`(論文的 Fig. 1、Fig. 2)。
 
 輸出(每個任務一個資料夾 `results/<task>/`):
 
@@ -759,7 +1006,7 @@ python verify_doc_numbers.py
 | `grad_flow_heatmaps.png` | 「層 × 訓練步」梯度熱圖(seed 0) |
 | `cond_path_share.png` | 條件路徑梯度佔比隨訓練的變化(AdaIN 家族 / SPADE) |
 | `summary.csv` / `metrics.json` | 數值摘要(mean±std)與完整原始數據 |
-| `provenance.json` | 該組數字的出處:git commit、torch/CUDA 版本、GPU、執行指令、時間 |
+| `provenance.json` | 該組數字的出處:git commit(在 git 之外跑的是 null,見 §8)、torch/CUDA 版本、GPU、執行指令、時間 |
 
 ## 10. 檔案結構
 
@@ -769,22 +1016,30 @@ Transformer-Gradient-Flow/
 │                               SPADE/WN,外加兩個解耦用的診斷 norm)
 ├── model.py                    MHSA、五種 placement 的 Block、TransformerLM(含 gradient
 │                               decomposition 與 attention probe 掛點,以及 cond_detach /
-│                               reinject 兩個對照開關)
+│                               reinject / cond_source 三個對照開關)
 ├── run_experiment.py           三個任務 + 訓練 + 三種量測 + 多種子 + 繪圖 + 摘要
 ├── analyze_grad_coherence.py   逐層梯度方向一致性量測(§5.5)
+├── analyze_layer_attn.py       逐層 t−1 attention 與重注入權重的深度剖面(§5.4 (f))
+├── check_pairing.py            配對檢查:各配置與 ln_post 在 step 0 逐位元相同(§5.4 (0))
+├── make_table2.py              從 metrics.json 產生論文的表格
 ├── provenance.py               記錄 git commit / 環境 / 指令(快照在訓練開始前拍)
-├── verify_doc_numbers.py       208 項文件數字核對
+├── verify_doc_numbers.py       331 項 README 數字核對
+├── verify_paper_numbers.py     34 項論文數字核對
 ├── requirements.txt
 │
 ├── README.md                   本文件  現況總結,只寫現在成立的結論
+├── paper/make_figs.py          產生論文的 Fig. 1、Fig. 2
 │
 ├── data/                       Tiny Shakespeare 語料(不隨附,首次執行 char_lm 時自動下載)
-├── results_legacy/             修訂前的凍結基準線(唯讀,含 MANIFEST.sha256)
+├── results_legacy.zip          修訂前的凍結基準線(唯讀,含 MANIFEST.sha256)
 └── results/
+    ├── reinject_n15_paired/          論文主結果:配對版 + E2,15 顆配對種子
+    ├── threats_lr1e-4/ threats_modk/ 論文 Threats:lr = 1e-4 與 modk 上的邊界,15 顆配對種子
+    ├── layer_attn_n15/               逐層 attention(用最終版程式重跑 7 個配置)
     ├── copy/ modk/ char_lm/          三個任務的主表
     ├── stability/                    A 組穩健性,10 seeds
     ├── h3/ h3_n15/                   H3 三方 ablation,15 seeds
-    ├── reinject_n15/                 純重注入對照,15 seeds
+    ├── reinject_n15/                 純重注入對照,15 seeds(配對修正前的舊批次)
     ├── gr_lr1e-4_n15/                lr=1e-4 的 GradRenorm,15 seeds
     ├── healthy_ctrl_pre/ _deepnorm/  干預的健康對照
     ├── detach_lr1e-4_n15/            lr=1e-4 的 detach 對照,15 seeds
@@ -802,12 +1057,22 @@ Transformer-Gradient-Flow/
 * Ulyanov, Vedaldi & Lempitsky. *Instance Normalization*. 2016. [arXiv:1607.08022](https://arxiv.org/abs/1607.08022)
 * Salimans & Kingma. *Weight Normalization*. NeurIPS 2016. [arXiv:1602.07868](https://arxiv.org/abs/1602.07868)
 * Huang & Belongie. *Arbitrary Style Transfer with AdaIN*. ICCV 2017. [arXiv:1703.06868](https://arxiv.org/abs/1703.06868)
+* Vaswani et al. *Attention Is All You Need*(原始 Transformer,Post-LN). NeurIPS 2017. [arXiv:1706.03762](https://arxiv.org/abs/1706.03762)
 * Wu & He. *Group Normalization*. ECCV 2018. [arXiv:1803.08494](https://arxiv.org/abs/1803.08494)
 * Park, Liu, Wang & Zhu. *SPADE*. CVPR 2019. [arXiv:1903.07291](https://arxiv.org/abs/1903.07291)
 * Zhang & Sennrich. *RMSNorm*. NeurIPS 2019. [arXiv:1910.07467](https://arxiv.org/abs/1910.07467)
 * Xiong et al. *On Layer Normalization in the Transformer Architecture*. ICML 2020. [arXiv:2002.04745](https://arxiv.org/abs/2002.04745)
 * Ding et al. *CogView*(Sandwich-LN). NeurIPS 2021. [arXiv:2105.13290](https://arxiv.org/abs/2105.13290)
 * Wang et al. *DeepNet: Scaling Transformers to 1,000 Layers*. 2022. [arXiv:2203.00555](https://arxiv.org/abs/2203.00555)
+
+§6.3(TAAI 論文的定位)另外用到:
+
+* Xu et al. *Understanding and Improving Layer Normalization*. NeurIPS 2019. [arXiv:1911.07013](https://arxiv.org/abs/1911.07013)
+* Liu et al. *Understanding the Difficulty of Training Transformers*(Admin). EMNLP 2020. [arXiv:2004.08249](https://arxiv.org/abs/2004.08249)
+* Bachlechner et al. *ReZero is All You Need: Fast Convergence at Large Depth*. UAI 2021. [arXiv:2003.04887](https://arxiv.org/abs/2003.04887)
+* Takase et al. *B2T Connection: Serving Stability and Performance in Deep Transformers*. Findings of ACL 2023. [arXiv:2206.00330](https://arxiv.org/abs/2206.00330)
+* Pagliardini et al. *DenseFormer: Enhancing Information Flow in Transformers via Depth Weighted Averaging*. NeurIPS 2024. [arXiv:2402.02622](https://arxiv.org/abs/2402.02622)
+* McLeish et al. *Transformers Can Do Arithmetic with the Right Embeddings*(input injection). NeurIPS 2024. [arXiv:2405.17399](https://arxiv.org/abs/2405.17399)
 
 ## License
 
