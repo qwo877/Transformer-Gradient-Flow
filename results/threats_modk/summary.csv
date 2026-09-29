@@ -1,0 +1,4 @@
+﻿key,label,params,seeds,cond_detach,cond_source,reinject,reinject_wnorm_min,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_to_target_final_headmean,attn_to_target_init_headmean,attn_uniform_baseline,cond_path_share_final_seed0,final_trunk_rms_seed0,final_cond_rms_seed0,max_decomposition_error,diverged
+ln_post,LN / Post-LN,3196992,15,,full,,,1.88 ± 0.32,70.7 ± 12.3,4.1625 ± 0.0008,nan,0.031 ± 0.001,0.031 ± 0.001,0.029 ± 0.001,0.029 ± 0.001,0.028,,,,0.00e+00,
+pre_ln,Pre-LN,3197248,15,,full,,,4.28 ± 0.42,236.9 ± 25.6,3.1761 ± 1.0022,nan,0.620 ± 0.270,0.031 ± 0.001,0.393 ± 0.130,0.029 ± 0.001,0.028,,,,0.00e+00,
+post_reinject,Post-LN + 純重注入(線性),3725376,15,,full,linear,0.211,1.88 ± 0.32,70.7 ± 12.3,4.1626 ± 0.0007,nan,0.031 ± 0.001,0.031 ± 0.001,0.029 ± 0.001,0.029 ± 0.001,0.028,1.000,1.233e-07,1.273e-05,2.60e-08,
