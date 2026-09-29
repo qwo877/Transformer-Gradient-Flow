@@ -37,8 +37,10 @@ TASK_LABELS = {
     "char_lm": "字元級語言建模(Tiny Shakespeare)",
 }
 
-Cfg = namedtuple("Cfg", "key label norm placement cond_detach reinject")
-Cfg.__new__.__defaults__ = (False, "none")  # cond_detach / reinject 的預設
+Cfg = namedtuple("Cfg",
+                 "key label norm placement cond_detach reinject cond_source")
+# cond_detach / reinject / cond_source 的預設      既有配置不必改一行
+Cfg.__new__.__defaults__ = (False, "none", "full")
 
 #我眼睛好痛
 CONFIGS = [
@@ -87,6 +89,18 @@ CONFIGS = [
     # 排除正向條件路徑影響
     Cfg("post_reinject_detach", "Post-LN + 純重注入(bypass 切斷)", "ln", "post",
         True, "linear"),
+
+    # E2:把 cond 的 token 內容與位置訊號拆開
+    # 三者只有 cond_source 不同 其餘與 post_reinject 完全一致
+    #   tok  只有內容(可學)  pos  只有位置(可學)  rand 只有位置區分度(凍結 無語意)
+    # pos 正好是 rand 的可學版本 所以 tok/pos 分    內容 vs 位置 
+    # pos/rand 分    可學 vs 凍結  兩軸切完 不需要第四格
+    Cfg("post_reinject_tok",  "Post-LN + 重注入(只有 token 內容)", "ln", "post",
+        False, "linear", "tok"),
+    Cfg("post_reinject_pos",  "Post-LN + 重注入(只有位置)", "ln", "post",
+        False, "linear", "pos"),
+    Cfg("post_reinject_rand", "Post-LN + 重注入(固定隨機 per-position)", "ln", "post",
+        False, "linear", "rand"),
     # 干預施加在健康模型上是否無害
     # 形式是 干預 X、結果沒變 => X 不是原因 其有效性完全取決於干預本身沒有引入新的失敗模式 
     # 這兩個配置必須搭配 --target-rms 逐配置校準
@@ -108,6 +122,9 @@ GROUP_H3 = ["adain", "adain_loc", "adain_loc_detach", "spade", "spade_detach"]
 # 純重注入:與 ln_post(沒有重注入)和 adain_loc(重注入 + 乘性調變)並排比較
 GROUP_R = ["ln_post", "adain_loc", "post_reinject", "post_reinject_detach",
            "post_reinject_mlp"]
+# E2:條件內容的成分分解      重注入的到底是    內容 還是    位置 
+GROUP_E2 = ["ln_post", "post_reinject", "post_reinject_tok",
+            "post_reinject_pos", "post_reinject_rand"]
 # 健康對照:同一個干預施加在本來就會收斂的配置上
 GROUP_HC = ["pre_ln", "pre_ln_gr", "deepnorm", "deepnorm_gr"]
 
@@ -241,7 +258,7 @@ def attn_uniform_baseline(seq_len, offset):
 # 探測
 
 def decompose_embedding_grad(hiddens, cond):
-    #把 embedding 處的總梯度拆成「殘差主幹」與「條件旁路」兩份
+    #把 embedding 處的總梯度拆成    殘差主幹 與    條件旁路 兩份
     #舊版量的是 share = RMS(g_cond)/RMS(g_total),那是兩個範數相除,不是分解
     
     g_total = hiddens[0].grad
@@ -261,9 +278,23 @@ def decompose_embedding_grad(hiddens, cond):
         "cos_trunk_cond": float(F.cosine_similarity(
             g_trunk.flatten(), g_cond.flatten(), dim=0)),
         # 恆等式殘差(相對於總梯度) 紀錄每次 probe
-        # 「The decomposition identity was verified at every probe」
+        #     The decomposition identity was verified at every probe 
         "decomposition_error": resid / max(total_rms, 1e-12),
     }
+
+
+def _decompose_or_na(model, hiddens, cond):
+    #只有在 cond 真的是 x 的分支時才做梯度分解
+    if getattr(model, "cond_decomposable", True):
+        return decompose_embedding_grad(hiddens, cond)
+    nan = float("nan")
+    return {"total_rms": _rms_of(hiddens[0].grad), "trunk_rms": nan,
+            "cond_rms": nan, "cos_trunk_cond": nan,
+            "decomposition_error": nan}
+
+
+def _rms_of(t):
+    return t.pow(2).mean().sqrt().item() if t is not None else float("nan")
 
 
 def probe_grad_flow(model, x, y, vocab, eval_mode=False):
@@ -277,7 +308,7 @@ def probe_grad_flow(model, x, y, vocab, eval_mode=False):
                            ignore_index=-100)
     loss.backward()
     rms = [h.grad.pow(2).mean().sqrt().item() for h in hiddens]
-    dec = decompose_embedding_grad(hiddens, cond)
+    dec = _decompose_or_na(model, hiddens, cond)
     model.zero_grad(set_to_none=True)
     if was_training:
         model.train()
@@ -285,7 +316,7 @@ def probe_grad_flow(model, x, y, vocab, eval_mode=False):
 
 
 def setup_determinism():
-    """在支援的運算上啟用決定性演算法"""
+    # 在支援的運算上啟用決定性演算法
     torch.use_deterministic_algorithms(True, warn_only=True)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -296,7 +327,7 @@ def setup_determinism():
 #喵安 我在這留了個註解 沒有任何意義
 @torch.no_grad()
 def eval_val_loss(model, val_batch_fn, vocab, device, n_batches=20, seed=777):
-    """固定種子的驗證集評估:所有配置在同一批 val 資料上比較"""
+    #固定種子的驗證集評估:所有配置在同一批 val 資料上比較
     was_training = model.training
     model.eval()
     gen = torch.Generator().manual_seed(seed)
@@ -314,25 +345,26 @@ def eval_val_loss(model, val_batch_fn, vocab, device, n_batches=20, seed=777):
 
 @torch.no_grad() #
 def probe_attn_offset(model, x, offset, eval_mode=False):
-    #回傳各層 attend 到 t-offset 位置的平均注意力權重
     was_training = model.training
     if eval_mode:
         model.eval()
     weights = []
     model(x, weights_out=weights)
-    vals = []
+    head_max, head_mean = [], []
     for w in weights:  # (B, H, L, L)
         L = w.shape[-1]
         idx = torch.arange(offset, L, device=w.device)
-        vals.append(w[..., idx, idx - offset].mean().item())
+        hit = w[..., idx, idx - offset]          # (B, H, L-offset)
+        head_max.append(hit.mean(dim=(0, 2)).max().item())
+        head_mean.append(hit.mean().item())
     if was_training:
         model.train()
-    return vals
+    return head_max, head_mean
 
 
 @torch.no_grad()
 def reinject_weight_norms(model):
-    """G4:逐 norm 點回報重注入投影的權重 Frobenius 範數"""
+    #G4:逐 norm 點回報重注入投影的權重 Frobenius 範數
     out = []
     for blk in model.blocks:
         if getattr(blk, "reinject", "none") == "none":
@@ -345,13 +377,14 @@ def reinject_weight_norms(model):
 
 def run_one_seed(seed, norm_name, placement, args, device, probe_batch,
                  vocab, offset, batch_fn, cond_detach=False, val_batch_fn=None,
-                 reinject="none"):
+                 reinject="none", cond_source="full"):
     torch.manual_seed(seed)
     model = TransformerLM(vocab, args.seq_len, args.d_model, args.n_heads,
                           args.d_ff, args.layers, norm_name, placement,
                           cond_detach=cond_detach,
                           emb_std=args.emb_std, reinject=reinject,
-                          target_rms=getattr(args, "target_rms", None)).to(device)
+                          target_rms=getattr(args, "target_rms", None),
+                          cond_source=cond_source).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     # 記於註解表117行
     if getattr(args, "optimizer", "adam") == "sgd":
@@ -366,7 +399,8 @@ def run_one_seed(seed, norm_name, placement, args, device, probe_batch,
     _, init_rms, init_dec = probe_grad_flow(model, px, py, vocab,
                                             eval_mode=eval_mode)
     init_cond_rms = init_dec["cond_rms"]
-    attn_prev_init = probe_attn_offset(model, px, offset, eval_mode=eval_mode)
+    attn_prev_init, attn_prev_init_hm = probe_attn_offset(
+        model, px, offset, eval_mode=eval_mode)
 
     gen = torch.Generator().manual_seed(1234 + seed)
     losses, probe_steps, probe_rms, probe_cond_rms = [], [], [], []
@@ -393,7 +427,7 @@ def run_one_seed(seed, norm_name, placement, args, device, probe_batch,
             grad_ok = all(h.grad is not None and torch.isfinite(h.grad).all()
                           for h in hiddens)
             if grad_ok:
-                dec = decompose_embedding_grad(hiddens, cond)
+                dec = _decompose_or_na(model, hiddens, cond)
                 probe_steps.append(step)
                 probe_rms.append([h.grad.pow(2).mean().sqrt().item()
                                   for h in hiddens])
@@ -427,11 +461,12 @@ def run_one_seed(seed, norm_name, placement, args, device, probe_batch,
         final_cond_rms = probe_cond_rms[-1] if probe_cond_rms else init_cond_rms
         final_trunk_rms = (probe_trunk_rms[-1] if probe_trunk_rms
                            else init_dec["trunk_rms"])
-    attn_prev_final = probe_attn_offset(model, px, offset, eval_mode=eval_mode)
+    attn_prev_final, attn_prev_final_hm = probe_attn_offset(
+        model, px, offset, eval_mode=eval_mode)
 
     return {
         "seed": seed, "n_params": n_params, "cond_detach": cond_detach,
-        "reinject": reinject,
+        "reinject": reinject, "cond_source": cond_source,
         "reinject_wnorm_final": reinject_weight_norms(model),
         "init_rms": init_rms, "final_rms": final_rms,
         "init_cond_rms": init_cond_rms, "final_cond_rms": final_cond_rms,
@@ -443,6 +478,8 @@ def run_one_seed(seed, norm_name, placement, args, device, probe_batch,
         "probe_decomposition_error": probe_dec_err,
         "max_decomposition_error": max(probe_dec_err) if probe_dec_err else 0.0,
         "attn_prev_init": attn_prev_init, "attn_prev_final": attn_prev_final,
+        "attn_prev_init_headmean": attn_prev_init_hm,
+        "attn_prev_final_headmean": attn_prev_final_hm,
         "val_steps": val_steps, "val_losses": val_losses,
         "final_val_loss": final_val_loss,
         "diverged_step": diverged_step,
@@ -459,13 +496,14 @@ def run_config(cfg, args, device, probe_batch, vocab, offset, batch_fn,
                              probe_batch, vocab, offset, batch_fn,
                              cond_detach=cfg.cond_detach,
                              val_batch_fn=val_batch_fn,
-                             reinject=cfg.reinject)
+                             reinject=cfg.reinject,
+                             cond_source=cfg.cond_source)
                 for s in range(args.seeds)]
     s0 = per_seed[0]
     return {
         "key": cfg.key, "label": cfg.label, "norm": cfg.norm,
         "placement": cfg.placement, "cond_detach": cfg.cond_detach,
-        "reinject": cfg.reinject,
+        "reinject": cfg.reinject, "cond_source": cfg.cond_source,
         "n_params": s0["n_params"], "seeds": args.seeds,
         "task": args.task, "attn_offset": offset,
         "emb_std": args.emb_std,
@@ -483,6 +521,8 @@ def run_config(cfg, args, device, probe_batch, vocab, offset, batch_fn,
         "final_trunk_rms": s0["final_trunk_rms"],
         "attn_prev_init": s0["attn_prev_init"],
         "attn_prev_final": s0["attn_prev_final"],
+        "attn_prev_init_headmean": s0["attn_prev_init_headmean"],
+        "attn_prev_final_headmean": s0["attn_prev_final_headmean"],
         "diverged_step": s0["diverged_step"],
         # 跨種子彙總
         "losses_all": [sd["losses"] for sd in per_seed],
@@ -496,6 +536,14 @@ def run_config(cfg, args, device, probe_batch, vocab, offset, batch_fn,
         "init_ratio_block_seeds": [sd["init_rms"][1] / max(sd["init_rms"][-1], 1e-12)
                                    for sd in per_seed],
         "attn_prev_final_seeds": [max(sd["attn_prev_final"]) for sd in per_seed],
+
+        "attn_prev_final_layers_seeds": [sd["attn_prev_final"] for sd in per_seed],
+        "attn_prev_init_layers_seeds": [sd["attn_prev_init"] for sd in per_seed],
+        "attn_prev_final_headmean_layers_seeds":
+            [sd["attn_prev_final_headmean"] for sd in per_seed],
+        # 舊口徑(層內對 head 平均)保留下來 讓  稀釋了多少 本身可被檢查
+        "attn_prev_final_headmean_seeds":
+            [max(sd["attn_prev_final_headmean"]) for sd in per_seed],
         # 驗證集(僅 char_lm)訓練 loss 低有多種解釋  architecture-level
         # acausal leakage / 局部統計利用 / 記憶化續切分能大幅削弱記憶化這一項但擋不住 acausal leakage要分開報
         "val_loss_seeds": [sd["final_val_loss"] for sd in per_seed],
@@ -503,6 +551,8 @@ def run_config(cfg, args, device, probe_batch, vocab, offset, batch_fn,
         # 實測基線:同樣取 16 層的最大值,與 final 的取法一致
         # 解析基線 attn_baseline 是 單層 值 拿它跟 16 層取最大比 有選擇偏差
         "attn_prev_init_seeds": [max(sd["attn_prev_init"]) for sd in per_seed],
+        "attn_prev_init_headmean_seeds":
+            [max(sd["attn_prev_init_headmean"]) for sd in per_seed],
         "max_decomposition_error": max(sd["max_decomposition_error"]
                                        for sd in per_seed),
         "diverged_steps": [sd["diverged_step"] for sd in per_seed],
@@ -544,20 +594,21 @@ def _plot_flow(ax, results, keys, which, title):
 
 
 def _panels(results):
-    """回傳這次結果實際涵蓋的分組面板"""
-    cand = [(GROUP_A, "A 組:歸一化「類型」", None),
-            (GROUP_B, "B 組:LN 的「擺放策略」", None),
+    # 回傳這次結果實際涵蓋的分組面板
+    cand = [(GROUP_A, "A 組:歸一化    類型 ", None),
+            (GROUP_B, "B 組:LN 的    擺放策略 ", None),
             (GROUP_C, "C 組:Pre 擺放下 LN vs RMSNorm", ["pre_rms"]),
             (GROUP_D, "D 組:前向尺度 vs 反向通路", ["post_ln_st", "post_ln_gr"]),
             (GROUP_H3, "H3:條件路徑三方 ablation", ["adain_loc_detach"]),
             (GROUP_R, "H3(iii):純重注入(無乘性調變)",
              ["post_reinject", "post_reinject_mlp"]),
+            (GROUP_E2, "E2:cond 的內容 / 位置分解",
+             ["post_reinject_tok", "post_reinject_pos", "post_reinject_rand"]),
             (GROUP_HC, "健康對照:干預是否無害", ["pre_ln_gr", "deepnorm_gr"])]
     out = []
     for ks, title, required in cand:
         if not any(k in results for k in ks):
             continue
-        # 關鍵配置一個都沒有 -> 這組畫出來沒有意義 略過
         if required and not any(k in results for k in required):
             continue
         out.append((ks, title))
@@ -580,7 +631,7 @@ def plot_grad_flow(results, which, fname, suffix, task_label):
 
 
 def plot_losses(results, task_label, chance=None):
-    """訓練曲線:細線 = 逐種子,粗線 = 中位數"""
+    # 訓練曲線:細線 = 逐種子 粗線 = 中位數
     panels = _panels(results)
     if not panels:
         return
@@ -621,7 +672,7 @@ def plot_losses(results, task_label, chance=None):
 
 
 def plot_heatmaps(results, n_layers, task_label, drop_embedding_row=True):
-    """熱力圖:橫軸 = 訓練步數,縱軸 = 深度,顏色 = log10(RMS(梯度))"""
+    # 熱力圖:橫軸 = 訓練步數,縱軸 = 深度,顏色 = log10(RMS(梯度))
     keys = [c.key for c in CONFIGS if c.key in results]
     if not keys:
         return
@@ -722,6 +773,8 @@ def write_summary(results):
             "key": k, "label": r["label"], "params": r["n_params"],
             "seeds": r["seeds"],
             "cond_detach": "yes" if r.get("cond_detach") else "",
+            # E2:cond 餵的是什麼(full = tok+pos,即改動前的行為)
+            "cond_source": r.get("cond_source", "full"),
             "reinject": r.get("reinject", "none") if
             r.get("reinject", "none") != "none" else "",
             "reinject_wnorm_min": f"{min(wn):.3f}" if wn else "",
@@ -735,6 +788,11 @@ def write_summary(results):
                              if v is not None]),
             "attn_to_target_final": _ms(r["attn_prev_final_seeds"], ".3f"),
             "attn_to_target_init": _ms(r.get("attn_prev_init_seeds", []), ".3f"),
+            # 舊口徑:層內對 4 個 head 平均 會把單一專職 head 稀釋掉
+            "attn_to_target_final_headmean":
+                _ms(r.get("attn_prev_final_headmean_seeds", []), ".3f"),
+            "attn_to_target_init_headmean":
+                _ms(r.get("attn_prev_init_headmean_seeds", []), ".3f"),
             "attn_uniform_baseline": f"{r.get('attn_baseline', float('nan')):.3f}",
             # 這三欄取自 seed 0 的軌跡 不是跨種子彙總  表頭標明
             # 否則讀者無從分辨它們與同表其他欄位(mean±std)的口徑不同
@@ -872,13 +930,10 @@ def main():
     for cfg in CONFIGS:
         if args.only and cfg.key not in args.only:
             continue
-        # post_ln_gr 的 target_rms 是在 copy 上校準的(= Post-LN 主幹逐層梯度 RMS的中位數)換任務而不重新校準,等於改變了梯度的整體尺度 
         if cfg.norm == "ln_gr" and args.task != "copy":
             print(f"WARNING: [{cfg.key}] 的 target_rms 是在 copy 上校準的,"
                   f"在 {args.task} 上未重新校準(實測 char_lm 的自然尺度約差 1.6 倍)。"
                   f"先重新校準。", flush=True)
-        # 同一個理由的另一半:預設值是對 **Post-LN** 校準的 把干預搬到別的
-        # 擺放上而不重新校準,等於偷偷改了整體梯度尺度(SGD 下就是改了effective learning rate),對照不乾淨
         if (cfg.norm == "ln_gr" and cfg.placement != "post"
                 and args.target_rms is None):
             print(f"WARNING: [{cfg.key}] 是 {cfg.placement} 擺放,但沒有給 --target-rms"
@@ -892,7 +947,7 @@ def main():
             r["ngram_baselines"] = baselines
         results[cfg.key] = r
         key = cfg.key
-        # 分解恆等式必須逐 probe 成立,否則 g_trunk / g_cond 的解讀不成立
+        # 分解恆等式必須逐 probe 成立 否則 g_trunk / g_cond 的解讀不成立
         if r["max_decomposition_error"] > 1e-6:
             print(f"WARNING: [{key}] 梯度分解恆等式殘差過大 "
                   f"{r['max_decomposition_error']:.2e} > 1e-6", flush=True)

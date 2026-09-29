@@ -33,7 +33,7 @@ class TokenLayerNorm(NormBase):
 
 
 class StraightThroughLayerNorm(NormBase):
-    #前向與 LayerNorm 逐位元相同,反向讓梯度以恆等通過。
+    #前向與 LayerNorm 逐位元相同,反向讓梯度以恆等通過
 
     def __init__(self, d_model, eps=1e-5):
         super().__init__()
@@ -69,7 +69,7 @@ class _RenormGrad(torch.autograd.Function):
 
 
 class GradRenormLayerNorm(NormBase):
-    #前向與 LayerNorm 位元相同,反向強制每層梯度 RMS 相等。
+    #前向與 LayerNorm 位元相同,反向強制每層梯度 RMS 相等
 
 
     def __init__(self, d_model, target_rms=6.0e-5):
@@ -78,7 +78,6 @@ class GradRenormLayerNorm(NormBase):
         # 預設值是校準過的:等於 Post-LN 在 copy 任務、16 層、初始化時
         # 主幹逐層梯度 RMS 的中位數(6.007e-05)
         # 這樣重正規化只 拉平剖面 不改變整體梯度尺度
-        # 否則在 SGD 下等於偷偷改了 effective learning rate 對照就不乾淨了
         # 此值與任務/loss 尺度相關 變換時需重新校準
         self.target_rms = target_rms
 
@@ -119,8 +118,11 @@ class AdaIN(NormBase):
     def __init__(self, d_model):
         super().__init__()
         self.inorm = nn.InstanceNorm1d(d_model, affine=False)
-        self.to_gamma = nn.Linear(d_model, d_model)
-        self.to_beta = nn.Linear(d_model, d_model)
+        # E1 RNG 配對:生成層是 zero-init 值本身沒有意義 但 nn.Linear 的
+        # reset_parameters 會消耗全域 RNG 讓同 seed 的 ln_post 與 adain* 從
+        # block 1 起主幹權重全部錯開 skip_init 跳過該步驟
+        self.to_gamma = nn.utils.skip_init(nn.Linear, d_model, d_model)
+        self.to_beta = nn.utils.skip_init(nn.Linear, d_model, d_model)
         for lin in (self.to_gamma, self.to_beta):
             nn.init.zeros_(lin.weight)
             nn.init.zeros_(lin.bias)
@@ -135,10 +137,10 @@ class AdaIN(NormBase):
 
 
 class AdaINLocal(AdaIN):
-    #AdaIN-local:與 AdaIN 唯一的差別是「不做序列平均池化」——
+    #AdaIN-local:與 AdaIN 唯一的差別是    不做序列平均池化     
     #gamma/beta 由條件圖逐位置生成 (B, L, D)
 
-    #作為條件「粒度」的消融對照,孤立單一變因:
+    #作為條件    粒度 的消融對照,孤立單一變因:
     #    全域向量 vs 逐位置向量 vs SPADE(逐位置 + 共享 MLP)
     #生成層繼承 AdaIN 的零初始化(初始應等價於純 IN(? )
     
@@ -155,9 +157,12 @@ class SPADE(NormBase):
     def __init__(self, d_model, hidden=64):
         super().__init__()
         self.inorm = nn.InstanceNorm1d(d_model, affine=False)
-        self.shared = nn.Sequential(nn.Linear(d_model, hidden), nn.GELU())
-        self.to_gamma = nn.Linear(hidden, d_model)
-        self.to_beta = nn.Linear(hidden, d_model)
+        # E1 RNG 配對:shared 需要真隨機初始化 用 fork_rng 抽完還原 RNG 狀態
+        # 兩個 zero-init 的生成層則用 skip_init 完全不抽
+        with torch.random.fork_rng(devices=[]):
+            self.shared = nn.Sequential(nn.Linear(d_model, hidden), nn.GELU())
+        self.to_gamma = nn.utils.skip_init(nn.Linear, hidden, d_model)
+        self.to_beta = nn.utils.skip_init(nn.Linear, hidden, d_model)
         for lin in (self.to_gamma, self.to_beta):
             nn.init.zeros_(lin.weight)
             nn.init.zeros_(lin.bias)
@@ -172,8 +177,8 @@ class SPADE(NormBase):
 def build_norm(name: str, d_model: int, target_rms: float = None) -> NormBase:
     # 建立對應 target_rms 只對 ln_gr 有意義:None = 用 GradRenormLayerNorm
     # 的預設(在 copy 上對 Post-LN 校準的 6.0e-5)
-    # 這個管道是實驗 3 需要的 —— 把同一個干預施加在 Pre-LN / DeepNorm 上時
-    # 必須逐配置重新校準 否則等於偷偷改變了整體梯度尺度
+    # 這個管道是實驗 3 需要的      把同一個干預施加在 Pre-LN / DeepNorm 上時
+    # 必須逐配置重新校準
     table = {
         "bn": lambda: SeqBatchNorm(d_model),
         "ln": lambda: TokenLayerNorm(d_model),
