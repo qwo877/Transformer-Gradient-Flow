@@ -1,0 +1,10 @@
+task=copy, vocab=64, attn_offset=1, attn_baseline=0.059
+device=cuda, layers=16, steps=1500, seeds=15
+C:\Users\user0409\AppData\Local\Programs\Python\Python313\Lib\site-packages\torch\autograd\graph.py:829: UserWarning: Memory Efficient attention defaults to a non-deterministic algorithm. To explicitly enable determinism call torch.use_deterministic_algorithms(True, warn_only=False). (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\native\transformers\cuda\attention_backward.cu:777.)
+  return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+[deepnorm        ] 3565.0s  attn_tgt=0.938 ± 0.017  final_loss=0.0005 ± 0.0000
+C:\Users\user0409\論文\run_experiment.py:765: UserWarning: No artists with labels found to put in legend.  Note that artists whose label start with an underscore are ignored when legend() is called with no argument.
+  ax.legend(prop=cjk(9))
+WARNING: 不在 git repo 裡,無法記錄 commit —— 這組結果的程式碼版本無法回溯
+
+圖表與數據已輸出到 C:\Users\user0409\論文\results\layer_attn_n15\deepnorm

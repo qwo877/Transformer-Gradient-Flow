@@ -1,0 +1,43 @@
+{
+ "timestamp": "2026-09-16T20:54:11+08:00",
+ "command": "run_experiment.py --task copy --out-dir layer_attn_n15/post_reinject_tok --seeds 15 --steps 1500 --deterministic --only post_reinject_tok",
+ "git_commit": null,
+ "git_branch": null,
+ "git_dirty": null,
+ "git_dirty_files": null,
+ "python": "3.13.3",
+ "torch": "2.8.0+cu128",
+ "cuda": "12.8",
+ "cudnn": 91002,
+ "gpu": "NVIDIA GeForce RTX 5070",
+ "platform": "Windows-11-10.0.26200-SP0",
+ "args": {
+  "task": "copy",
+  "modk_gap": 16,
+  "steps": 1500,
+  "seeds": 15,
+  "layers": 16,
+  "d_model": 128,
+  "n_heads": 4,
+  "d_ff": 512,
+  "vocab": 64,
+  "seq_len": 64,
+  "batch": 32,
+  "lr": 0.0003,
+  "probe_every": 10,
+  "emb_std": 0.02,
+  "device": "cuda",
+  "replot": false,
+  "only": [
+   "post_reinject_tok"
+  ],
+  "out_dir": "layer_attn_n15/post_reinject_tok",
+  "train_frac": 0.9,
+  "val_every": 0,
+  "val_batches": 20,
+  "probe_eval_mode": false,
+  "optimizer": "adam",
+  "target_rms": null,
+  "deterministic": true
+ }
+}

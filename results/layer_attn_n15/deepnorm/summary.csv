@@ -1,0 +1,2 @@
+﻿key,label,params,seeds,cond_detach,cond_source,reinject,reinject_wnorm_min,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_to_target_final_headmean,attn_to_target_init_headmean,attn_uniform_baseline,cond_path_share_final_seed0,final_trunk_rms_seed0,final_cond_rms_seed0,max_decomposition_error,diverged
+deepnorm,DeepNorm,3196992,15,,full,,,0.99 ± 0.00,35.4 ± 0.2,0.0005 ± 0.0000,nan,0.938 ± 0.017,0.071 ± 0.003,0.920 ± 0.021,0.063 ± 0.002,0.059,,,,0.00e+00,

@@ -1,0 +1,20 @@
+% 需要 \usepackage{booktabs}
+\begin{table}[tb]
+\centering
+\caption{Escape rates on the copy task (15 paired seeds; Clopper--Pearson 95\% CIs); attn$\to t{-}1$ is the largest attention weight on $t-1$ over layers and heads.}
+\label{tab:main}
+\smallskip
+\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lrrcrrc}
+\toprule
+Configuration & \multicolumn{1}{c}{\begin{tabular}{@{}r@{}}Cond.\ par.\\/norm pt.\end{tabular}} & Escape & 95\% CI & \multicolumn{1}{c}{\begin{tabular}{@{}c@{}}McNemar\\$p$\end{tabular}} & \multicolumn{1}{c}{\begin{tabular}{@{}r@{}}Median\\loss\end{tabular}} & \multicolumn{1}{c}{\begin{tabular}{@{}c@{}}attn$\to t{-}1$\\(init $\approx 0.07$)\end{tabular}} \\
+\midrule
+Post-LN & -- & 0/15 & [0.00,\,0.22] & -- & 4.1621 & $0.066{\pm}0.002$ \\
+AdaIN-local & 33{,}024 & 9/15 & [0.32,\,0.84] & $0.0039$ & 0.0771 & $0.265{\pm}0.150$ \\
+Re-inj. & 16{,}512 & \textbf{15/15} & [0.78,\,1.00] & $6.1\times10^{-5}$ & 0.0025 & $0.252{\pm}0.012$ \\
+Re-inj.+detach & 16{,}512 & \textbf{15/15} & [0.78,\,1.00] & $6.1\times10^{-5}$ & 0.0051 & $0.248{\pm}0.005$ \\
+Re-inj. (MLP) & 33{,}024 & \textbf{15/15} & [0.78,\,1.00] & $6.1\times10^{-5}$ & 0.0025 & $0.319{\pm}0.055$ \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,0 +1,11 @@
+﻿key,label,params,seeds,cond_detach,cond_source,reinject,reinject_wnorm_min,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_to_target_final_headmean,attn_to_target_init_headmean,attn_uniform_baseline,cond_path_share_final_seed0,final_trunk_rms_seed0,final_cond_rms_seed0,max_decomposition_error,diverged
+ln_post,LN / Post-LN,3196992,15,,full,,,2.12 ± 0.39,79.0 ± 14.7,4.1619 ± 0.0006,nan,0.066 ± 0.002,0.068 ± 0.002,0.063 ± 0.001,0.063 ± 0.001,0.059,,,,0.00e+00,
+adain_loc,AdaIN-local (Post),4245568,15,,full,,,36.86 ± 4.41,1549.9 ± 190.7,1.2571 ± 1.8612,nan,0.265 ± 0.150,0.065 ± 0.003,0.242 ± 0.119,0.060 ± 0.001,0.059,0.041,2.113e+00,9.019e-02,2.92e-08,
+pre_ln,Pre-LN,3197248,15,,full,,,4.60 ± 0.50,251.5 ± 29.8,0.0003 ± 0.0000,nan,0.786 ± 0.067,0.070 ± 0.003,0.586 ± 0.027,0.063 ± 0.001,0.059,,,,0.00e+00,
+deepnorm,DeepNorm,3196992,15,,full,,,0.99 ± 0.00,35.4 ± 0.2,0.0005 ± 0.0000,nan,0.938 ± 0.017,0.071 ± 0.003,0.920 ± 0.021,0.063 ± 0.002,0.059,,,,0.00e+00,
+post_reinject,Post-LN + 純重注入(線性),3725376,15,,full,linear,0.289,2.12 ± 0.39,79.0 ± 14.7,0.0025 ± 0.0002,nan,0.252 ± 0.012,0.068 ± 0.002,0.231 ± 0.018,0.063 ± 0.001,0.059,1.000,3.477e-07,1.566e-05,2.68e-08,
+post_reinject_mlp,"Post-LN + 純重注入(MLP,參數對齊)",4253760,15,,full,mlp,0.219,2.12 ± 0.39,79.0 ± 14.7,0.0025 ± 0.0001,nan,0.319 ± 0.055,0.068 ± 0.002,0.307 ± 0.052,0.063 ± 0.001,0.059,1.000,2.003e-07,1.684e-05,2.54e-08,
+post_reinject_detach,Post-LN + 純重注入(bypass 切斷),3725376,15,yes,full,linear,0.402,2.12 ± 0.39,79.0 ± 14.7,0.0052 ± 0.0006,nan,0.248 ± 0.005,0.068 ± 0.002,0.231 ± 0.006,0.063 ± 0.001,0.059,0.000,3.916e-06,0.000e+00,0.00e+00,
+post_reinject_tok,Post-LN + 重注入(只有 token 內容),3725376,15,,tok,linear,0.700,2.12 ± 0.39,79.0 ± 14.7,0.0093 ± 0.0140,nan,0.278 ± 0.047,0.068 ± 0.002,0.264 ± 0.047,0.063 ± 0.001,0.059,,,,nan,
+post_reinject_pos,Post-LN + 重注入(只有位置),3725376,15,,pos,linear,0.196,2.12 ± 0.39,79.0 ± 14.7,4.1619 ± 0.0006,nan,0.066 ± 0.002,0.068 ± 0.002,0.062 ± 0.001,0.063 ± 0.001,0.059,,,,nan,
+post_reinject_rand,Post-LN + 重注入(固定隨機 per-position),3725376,15,,rand,linear,0.177,2.12 ± 0.39,79.0 ± 14.7,4.1620 ± 0.0007,nan,0.067 ± 0.002,0.068 ± 0.002,0.063 ± 0.001,0.063 ± 0.001,0.059,,,,0.00e+00,

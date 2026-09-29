@@ -1,0 +1,2 @@
+﻿key,label,params,seeds,cond_detach,cond_source,reinject,reinject_wnorm_min,init_block_ratio,init_bottom_top_ratio_confounded,final_loss_mean10,val_loss,attn_to_target_final,attn_to_target_init,attn_to_target_final_headmean,attn_to_target_init_headmean,attn_uniform_baseline,cond_path_share_final_seed0,final_trunk_rms_seed0,final_cond_rms_seed0,max_decomposition_error,diverged
+ln_post,LN / Post-LN,3196992,15,,full,,,2.12 ± 0.39,79.0 ± 14.7,4.1619 ± 0.0006,nan,0.066 ± 0.002,0.068 ± 0.002,0.063 ± 0.001,0.063 ± 0.001,0.059,,,,0.00e+00,
